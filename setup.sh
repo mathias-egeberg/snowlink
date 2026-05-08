@@ -19,33 +19,11 @@ BASE_PACKAGES=(
     libportmidi-dev libswscale-dev libavformat-dev libavcodec-dev \
     zlib1g-dev libgstreamer1.0-dev gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good libmtdev-dev xclip xsel \
-    python3-gi python3-gi-cairo gir1.2-gtk-3.0 gobject-introspection \
-    libcairo2-dev pkg-config \
+    chromium xdotool wmctrl \
 )
 
-GI_DEV_PACKAGE="$(first_available_package libgirepository-2.0-dev libgirepository1.0-dev || true)"
-WEBKIT_GIR_PACKAGE="$(first_available_package gir1.2-webkit-6.0 gir1.2-webkit2-4.1 gir1.2-webkit2-4.0 || true)"
-WEBKIT_DEV_PACKAGE="$(first_available_package libwebkitgtk-6.0-dev libwebkit2gtk-4.1-dev libwebkit2gtk-4.0-dev || true)"
-
-if [ -z "$GI_DEV_PACKAGE" ]; then
-    echo ">>> Could not find a GObject introspection development package in apt repositories."
-    echo "    Expected one of: libgirepository-2.0-dev, libgirepository1.0-dev"
-    exit 1
-fi
-
-if [ -z "$WEBKIT_GIR_PACKAGE" ]; then
-    echo ">>> Could not find a WebKit GTK GIR package in apt repositories."
-    echo "    Expected one of: gir1.2-webkit-6.0, gir1.2-webkit2-4.1, gir1.2-webkit2-4.0"
-    exit 1
-fi
-
-EXTRA_PACKAGES=("$GI_DEV_PACKAGE" "$WEBKIT_GIR_PACKAGE")
-if [ -n "$WEBKIT_DEV_PACKAGE" ]; then
-    EXTRA_PACKAGES+=("$WEBKIT_DEV_PACKAGE")
-fi
-
-echo ">>> Installing GTK/WebKit runtime packages: $GI_DEV_PACKAGE $WEBKIT_GIR_PACKAGE${WEBKIT_DEV_PACKAGE:+ $WEBKIT_DEV_PACKAGE}"
-sudo apt-get install -y "${BASE_PACKAGES[@]}" "${EXTRA_PACKAGES[@]}"
+echo ">>> Installing base packages..."
+sudo apt-get install -y "${BASE_PACKAGES[@]}"
 
 # ── Ensure Python 3.11 via pyenv (Kivy requires <3.13) ───────────────────────
 PYTHON_VERSION="3.11.9"
