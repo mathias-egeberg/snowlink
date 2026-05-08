@@ -8,14 +8,15 @@ set -e
 echo ">>> Updating system packages..."
 sudo apt-get update -y
 sudo apt-get install -y \
-    python3-pip python3-venv \
+    python3.11 python3.11-venv python3.11-dev \
+    python3-pip \
     libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
     libportmidi-dev libswscale-dev libavformat-dev libavcodec-dev \
     zlib1g-dev libgstreamer1.0-dev gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good libmtdev-dev xclip xsel
 
-echo ">>> Creating Python virtual environment..."
-python3 -m venv venv
+echo ">>> Creating Python virtual environment (Python 3.11)..."
+python3.11 -m venv venv
 source venv/bin/activate
 
 echo ">>> Installing Python dependencies..."
