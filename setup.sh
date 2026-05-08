@@ -81,7 +81,7 @@ source venv/bin/activate
 
 echo ">>> Installing Python dependencies..."
 pip install --upgrade pip
-pip install pycairo PyGObject || {
+pip install pycairo 'PyGObject>=3.52,<4' || {
     echo ">>> Failed to build/install pycairo or PyGObject for the pyenv Python environment."
     echo "    Verify pkg-config, cairo, and gobject-introspection development packages are installed."
     exit 1
