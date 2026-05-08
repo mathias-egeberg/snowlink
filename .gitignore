@@ -3,6 +3,16 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Virtual environment
+venv/
+
+# Kivy cache
+.kivy/
+
+# Env files
+.env
+*.log
+
 # C extensions
 *.so
 

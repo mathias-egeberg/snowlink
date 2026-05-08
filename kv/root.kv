@@ -1,0 +1,29 @@
+#:import NoTransition kivy.uix.screenmanager.NoTransition
+
+<RootWidget>:
+    orientation: 'vertical'
+    spacing: 0
+    canvas.before:
+        Color:
+            rgba: 0.102, 0.102, 0.180, 1
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+    ScreenManager:
+        id: screen_manager
+        transition: NoTransition()
+
+        DashboardScreen:
+            name: 'dashboard'
+
+        ControlScreen:
+            name: 'control'
+
+        SettingsScreen:
+            name: 'settings'
+
+    NavBar:
+        id: nav_bar
+        size_hint_y: None
+        height: '70dp'

@@ -1,0 +1,5 @@
+# SnowLink - Raspberry Pi Requirements
+# Tested on Raspberry Pi OS Bullseye / Bookworm
+
+kivy==2.3.0
+Pillow>=10.0.0

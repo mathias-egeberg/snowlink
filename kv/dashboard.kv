@@ -1,0 +1,172 @@
+<DashboardScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        spacing: 0
+
+        # ── Header bar ────────────────────────────────────────────────────
+        BoxLayout:
+            orientation: 'horizontal'
+            size_hint_y: None
+            height: '70dp'
+            padding: '24dp', '10dp'
+            spacing: '12dp'
+            canvas.before:
+                Color:
+                    rgba: 0.086, 0.129, 0.243, 1
+                Rectangle:
+                    pos: self.pos
+                    size: self.size
+                # Bottom divider
+                Color:
+                    rgba: 0.0, 0.706, 0.847, 0.3
+                Line:
+                    points: [self.x, self.y, self.right, self.y]
+                    width: 1
+
+            # App title
+            Label:
+                text: 'SnowLink'
+                font_size: '24sp'
+                bold: True
+                color: 0.0, 0.706, 0.847, 1
+                size_hint_x: None
+                width: '160dp'
+                halign: 'left'
+                valign: 'middle'
+                text_size: self.size
+
+            # Status indicator (dot + label)
+            BoxLayout:
+                orientation: 'horizontal'
+                spacing: '8dp'
+                size_hint_x: None
+                width: '160dp'
+
+                Label:
+                    id: status_dot
+                    text: '\u25cf'
+                    font_size: '20sp'
+                    color: 0.3, 0.3, 0.35, 1
+                    size_hint_x: None
+                    width: '24dp'
+                    halign: 'center'
+                    valign: 'middle'
+                    text_size: self.size
+
+                Label:
+                    id: lbl_status_text
+                    text: 'IDLE'
+                    font_size: '14sp'
+                    bold: True
+                    color: 0.3, 0.3, 0.35, 1
+                    halign: 'left'
+                    valign: 'middle'
+                    text_size: self.size
+
+            # Spacer
+            Widget:
+
+            # Clock + date (right aligned)
+            BoxLayout:
+                orientation: 'vertical'
+                size_hint_x: None
+                width: '210dp'
+
+                Label:
+                    id: lbl_time
+                    text: '--:--:--'
+                    font_size: '22sp'
+                    bold: True
+                    color: 0.910, 0.910, 0.910, 1
+                    halign: 'right'
+                    valign: 'bottom'
+                    text_size: self.size
+
+                Label:
+                    id: lbl_date
+                    text: '---'
+                    font_size: '12sp'
+                    color: 0.612, 0.639, 0.686, 1
+                    halign: 'right'
+                    valign: 'top'
+                    text_size: self.size
+
+        # ── Sensor grid ───────────────────────────────────────────────────
+        BoxLayout:
+            orientation: 'vertical'
+            padding: '20dp'
+            spacing: '16dp'
+
+            # Row 1: environmental sensors
+            GridLayout:
+                cols: 3
+                spacing: '16dp'
+                size_hint_y: 1
+
+                StatusCard:
+                    id: card_temp
+                    label: 'Outside Temperature'
+                    value: '--'
+                    unit: 'C'
+
+                StatusCard:
+                    id: card_snow
+                    label: 'Snow Depth'
+                    value: '--'
+                    unit: 'cm'
+
+                StatusCard:
+                    id: card_wind
+                    label: 'Wind Speed'
+                    value: '--'
+                    unit: 'm/s'
+
+            # Row 2: system metrics
+            GridLayout:
+                cols: 3
+                spacing: '16dp'
+                size_hint_y: 1
+
+                StatusCard:
+                    id: card_power
+                    label: 'Power Consumption'
+                    value: '0'
+                    unit: 'W'
+
+                StatusCard:
+                    id: card_devices
+                    label: 'Active Devices'
+                    value: '0'
+                    unit: ''
+
+                # Last event card (custom inline card)
+                BoxLayout:
+                    orientation: 'vertical'
+                    padding: '18dp', '16dp'
+                    spacing: '8dp'
+                    canvas.before:
+                        Color:
+                            rgba: 0.059, 0.204, 0.376, 1
+                        RoundedRectangle:
+                            pos: self.pos
+                            size: self.size
+                            radius: [dp(14), dp(14), dp(14), dp(14)]
+
+                    Label:
+                        text: 'Last Event'
+                        font_size: '13sp'
+                        color: 0.612, 0.639, 0.686, 1
+                        size_hint_y: None
+                        height: '22dp'
+                        halign: 'left'
+                        valign: 'middle'
+                        text_size: self.size
+
+                    Label:
+                        id: lbl_event
+                        text: '---'
+                        font_size: '16sp'
+                        color: 0.910, 0.910, 0.910, 1
+                        halign: 'left'
+                        valign: 'middle'
+                        text_size: self.size
