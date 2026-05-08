@@ -8,15 +8,33 @@ set -e
 echo ">>> Updating system packages..."
 sudo apt-get update -y
 sudo apt-get install -y \
-    python3.11 python3.11-venv python3.11-dev \
-    python3-pip \
+    make build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev \
+    libsqlite3-dev wget curl llvm libncursesw5-dev xz-utils tk-dev \
+    libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev \
     libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
     libportmidi-dev libswscale-dev libavformat-dev libavcodec-dev \
     zlib1g-dev libgstreamer1.0-dev gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good libmtdev-dev xclip xsel
 
-echo ">>> Creating Python virtual environment (Python 3.11)..."
-python3.11 -m venv venv
+# ── Ensure Python 3.11 via pyenv (Kivy requires <3.13) ───────────────────────
+PYTHON_VERSION="3.11.9"
+export PYENV_ROOT="$HOME/.pyenv"
+if [ ! -d "$PYENV_ROOT" ]; then
+    echo ">>> Installing pyenv..."
+    curl https://pyenv.run | bash
+fi
+export PATH="$PYENV_ROOT/bin:$PATH"
+eval "$(pyenv init -)"
+
+if ! pyenv versions | grep -q "$PYTHON_VERSION"; then
+    echo ">>> Installing Python $PYTHON_VERSION (this may take a few minutes)..."
+    pyenv install "$PYTHON_VERSION"
+fi
+pyenv local "$PYTHON_VERSION"
+echo ">>> Using $(python --version)"
+
+echo ">>> Creating Python virtual environment (Python $PYTHON_VERSION)..."
+python -m venv venv
 source venv/bin/activate
 
 echo ">>> Installing Python dependencies..."
