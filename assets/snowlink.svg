@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="256" height="256">
+  <!-- Dark navy background -->
+  <circle cx="50" cy="50" r="48" fill="#1A1A2E"/>
+
+  <!-- Snowflake: 6 arms defined once, rotated into place -->
+  <defs>
+    <g id="arm">
+      <!-- Main spine -->
+      <line x1="50" y1="50" x2="50" y2="16"
+            stroke="#00B4D8" stroke-width="3.5" stroke-linecap="round"/>
+      <!-- Upper branches (60% up the arm) -->
+      <line x1="50" y1="27" x2="43" y2="20"
+            stroke="#00B4D8" stroke-width="2.5" stroke-linecap="round"/>
+      <line x1="50" y1="27" x2="57" y2="20"
+            stroke="#00B4D8" stroke-width="2.5" stroke-linecap="round"/>
+      <!-- Lower branches (38% up the arm) -->
+      <line x1="50" y1="36" x2="44.5" y2="30.5"
+            stroke="#00B4D8" stroke-width="2" stroke-linecap="round"/>
+      <line x1="50" y1="36" x2="55.5" y2="30.5"
+            stroke="#00B4D8" stroke-width="2" stroke-linecap="round"/>
+      <!-- Tip dot -->
+      <circle cx="50" cy="16" r="2.5" fill="#00B4D8"/>
+    </g>
+  </defs>
+
+  <use href="#arm" transform="rotate(0,   50, 50)"/>
+  <use href="#arm" transform="rotate(60,  50, 50)"/>
+  <use href="#arm" transform="rotate(120, 50, 50)"/>
+  <use href="#arm" transform="rotate(180, 50, 50)"/>
+  <use href="#arm" transform="rotate(240, 50, 50)"/>
+  <use href="#arm" transform="rotate(300, 50, 50)"/>
+
+  <!-- Centre hub (ring + inner fill) -->
+  <circle cx="50" cy="50" r="5"   fill="#00B4D8"/>
+  <circle cx="50" cy="50" r="2.5" fill="#1A1A2E"/>
+</svg>

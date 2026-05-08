@@ -9,6 +9,7 @@
             size_hint_y: None
             height: '70dp'
             padding: '24dp', '10dp'
+            spacing: '12dp'
             canvas.before:
                 Color:
                     rgba: 0.086, 0.129, 0.243, 1
@@ -30,7 +31,46 @@
                 valign: 'middle'
                 text_size: self.size
 
-            Widget:
+            # Connection status indicators
+            ConnIndicator:
+                id: ind_5g
+                label: '5G'
+                icon_type: '5g'
+
+            ConnIndicator:
+                id: ind_gps
+                label: 'GPS'
+                icon_type: 'gps'
+
+            ConnIndicator:
+                id: ind_imu
+                label: 'IMU'
+                icon_type: 'imu'
+
+            # Clock + date
+            BoxLayout:
+                orientation: 'vertical'
+                size_hint_x: None
+                width: '210dp'
+
+                Label:
+                    id: lbl_time_ctrl
+                    text: '--:--:--'
+                    font_size: '22sp'
+                    bold: True
+                    color: 0.910, 0.910, 0.910, 1
+                    halign: 'right'
+                    valign: 'bottom'
+                    text_size: self.size
+
+                Label:
+                    id: lbl_date_ctrl
+                    text: '---'
+                    font_size: '12sp'
+                    color: 0.612, 0.639, 0.686, 1
+                    halign: 'right'
+                    valign: 'top'
+                    text_size: self.size
 
             ExitButton:
 

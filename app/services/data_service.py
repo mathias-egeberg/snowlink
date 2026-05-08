@@ -35,6 +35,11 @@ class DataService(EventDispatcher):
     pump_on            = BooleanProperty(False)
     sensor_light_on    = BooleanProperty(True)
 
+    # ── Connection / peripheral status ───────────────────────────────────
+    cellular_ok = BooleanProperty(False)
+    gps_ok      = BooleanProperty(False)
+    imu_ok      = BooleanProperty(False)
+
     _instance = None
 
     @classmethod

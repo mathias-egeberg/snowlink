@@ -29,6 +29,7 @@ Version=1.0
 Type=Application
 Name=SnowLink
 Comment=Snow and ice management system
+Icon=$SNOWLINK_DIR/assets/snowlink.svg
 Exec=/bin/bash -c 'cd $SNOWLINK_DIR && source venv/bin/activate && SNOWLINK_FULLSCREEN=1 python main.py'
 Terminal=false
 StartupNotify=false

@@ -31,6 +31,7 @@ from kivy.uix.boxlayout import BoxLayout  # noqa: E402
 from app.widgets.status_card   import StatusCard    # noqa: F401
 from app.widgets.device_toggle import DeviceToggle  # noqa: F401
 from app.widgets.nav_bar       import NavBar, NavButton, ExitButton  # noqa: F401
+from app.widgets.conn_indicator import ConnIndicator  # noqa: F401
 from app.screens.dashboard     import DashboardScreen  # noqa: F401
 from app.screens.control       import ControlScreen    # noqa: F401
 from app.screens.settings      import SettingsScreen   # noqa: F401
@@ -40,6 +41,7 @@ _KV_DIR = os.path.join(os.path.dirname(__file__), "kv")
 _KV_FILES = [
     "status_card.kv",
     "device_toggle.kv",
+    "conn_indicator.kv",
     "nav_bar.kv",
     "dashboard.kv",
     "control.kv",

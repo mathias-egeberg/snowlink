@@ -1,3 +1,5 @@
+import datetime
+
 from kivy.clock import Clock
 from kivy.uix.screenmanager import Screen
 
@@ -20,18 +22,40 @@ class ControlScreen(Screen):
             heat_gutter_on=self._sync_toggles,
             pump_on=self._sync_toggles,
             sensor_light_on=self._sync_toggles,
+            cellular_ok=self._on_connections,
+            gps_ok=self._on_connections,
+            imu_ok=self._on_connections,
         )
+        self._on_connections()
+        self._clock_event = Clock.schedule_interval(self._tick_clock, 1)
+        self._tick_clock(0)
 
     def on_leave(self):
+        if hasattr(self, '_clock_event'):
+            self._clock_event.cancel()
         ds = DataService.get()
         ds.unbind(
             heat_roof_on=self._sync_toggles,
             heat_gutter_on=self._sync_toggles,
             pump_on=self._sync_toggles,
             sensor_light_on=self._sync_toggles,
+            cellular_ok=self._on_connections,
+            gps_ok=self._on_connections,
+            imu_ok=self._on_connections,
         )
 
     # ── Helpers ───────────────────────────────────────────────────────────
+
+    def _tick_clock(self, _dt):
+        now = datetime.datetime.now()
+        self.ids.lbl_time_ctrl.text = now.strftime("%H:%M:%S")
+        self.ids.lbl_date_ctrl.text = now.strftime("%A, %d %b %Y")
+
+    def _on_connections(self, *_):
+        ds = DataService.get()
+        self.ids.ind_5g.is_ok  = ds.cellular_ok
+        self.ids.ind_gps.is_ok = ds.gps_ok
+        self.ids.ind_imu.is_ok = ds.imu_ok
 
     def _sync_toggles(self, *_args):
         ds = DataService.get()

@@ -34,6 +34,9 @@ class DashboardScreen(Screen):
             active_devices=self._on_devices,
             system_status=self._on_status,
             last_event=self._on_event,
+            cellular_ok=self._on_connections,
+            gps_ok=self._on_connections,
+            imu_ok=self._on_connections,
         )
         Clock.schedule_interval(self._tick_clock, 1)
 
@@ -46,6 +49,9 @@ class DashboardScreen(Screen):
             active_devices=self._on_devices,
             system_status=self._on_status,
             last_event=self._on_event,
+            cellular_ok=self._on_connections,
+            gps_ok=self._on_connections,
+            imu_ok=self._on_connections,
         )
         Clock.unschedule(self._tick_clock)
 
@@ -60,6 +66,7 @@ class DashboardScreen(Screen):
         ids.card_devices.value = str(ds.active_devices)
         self._on_status(ds, ds.system_status)
         ids.lbl_event.text = ds.last_event
+        self._on_connections()
         self._tick_clock(0)
 
     def _tick_clock(self, _dt):
@@ -81,3 +88,9 @@ class DashboardScreen(Screen):
         self.ids.status_dot.color      = color
         self.ids.lbl_status_text.text  = label
         self.ids.lbl_status_text.color = color
+
+    def _on_connections(self, *_):
+        ds = DataService.get()
+        self.ids.ind_5g.is_ok  = ds.cellular_ok
+        self.ids.ind_gps.is_ok = ds.gps_ok
+        self.ids.ind_imu.is_ok = ds.imu_ok
