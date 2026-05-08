@@ -5,9 +5,13 @@ Window/display configuration must happen before any other Kivy imports,
 so the Config.set() calls are placed at the very top.
 """
 import os
+import sys
 
 # ── Window configuration (before any other Kivy import) ──────────────────
 os.environ.setdefault("KIVY_NO_ENV_CONFIG", "1")
+if sys.platform.startswith("linux"):
+    os.environ["GDK_BACKEND"] = "x11"
+    os.environ["SDL_VIDEODRIVER"] = "x11"
 
 from kivy.config import Config  # noqa: E402 – must come before kivy.app
 

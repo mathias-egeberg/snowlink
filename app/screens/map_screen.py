@@ -827,6 +827,7 @@ class MapHost:
         self._attached_view = view
         if self._embedded:
             self._sync_to_view()
+            self._schedule_geometry_wiggle()
             view.set_status("")
         else:
             view.set_status("Loading 3D map…")
@@ -975,7 +976,7 @@ class MapHost:
         wid = _read_window_id_file(self._handle_path)
         if wid < 0:
             wid = _xdotool_search_pid(self._proc.pid)
-        elif not wid and self._embed_ticks > 10:
+        elif not wid and self._embed_ticks > 2:
             wid = _xdotool_search_pid(self._proc.pid)
         if not wid:
             if self._embed_ticks in (1, 5, 20, 50, 100):
@@ -1038,6 +1039,10 @@ class MapHost:
         elif _is_windows():
             _move_child(self._wid, cx, cy, max(2, w - 1), max(2, h - 1))
             _move_child(self._wid, cx, cy, w, h)
+
+    def _schedule_geometry_wiggle(self) -> None:
+        for delay in (0.05, 0.2, 0.5, 1.0):
+            Clock.schedule_once(self._geometry_wiggle, delay)
 
 
 _MAP_HOST: Optional[MapHost] = None
