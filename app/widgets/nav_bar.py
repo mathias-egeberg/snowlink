@@ -1,3 +1,5 @@
+import sys
+
 from kivy.app import App
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
@@ -9,6 +11,13 @@ class NavButton(ButtonBehavior, BoxLayout):
 
     text      = StringProperty("")
     is_active = BooleanProperty(False)
+
+
+class ExitButton(ButtonBehavior, BoxLayout):
+    """Red exit button on the far right of the nav bar."""
+
+    def on_release(self) -> None:
+        App.get_running_app().stop()
 
 
 class NavBar(BoxLayout):

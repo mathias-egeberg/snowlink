@@ -1,3 +1,26 @@
+<ExitButton>:
+    size_hint_x: None
+    width: '70dp'
+    canvas.before:
+        Color:
+            rgba: (0.75, 0.10, 0.10, 0.18)
+        RoundedRectangle:
+            pos:  self.x + dp(8), self.y + dp(10)
+            size: self.width - dp(16), self.height - dp(20)
+            radius: [dp(6)]
+    canvas:
+        Color:
+            rgba: (0.95, 0.25, 0.25, 1)
+        Line:
+            points: [self.center_x - dp(10), self.center_y - dp(10), self.center_x + dp(10), self.center_y + dp(10)]
+            width: 2.5
+            cap: 'round'
+        Line:
+            points: [self.center_x + dp(10), self.center_y - dp(10), self.center_x - dp(10), self.center_y + dp(10)]
+            width: 2.5
+            cap: 'round'
+
+
 <NavButton>:
     orientation: 'vertical'
     padding: '8dp', '8dp'
