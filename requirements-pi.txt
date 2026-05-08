@@ -4,4 +4,4 @@
 kivy==2.3.0
 Pillow>=10.0.0
 httpx>=0.24.0
-pywebview>=4.0
+pywebview[gtk]>=4.0
