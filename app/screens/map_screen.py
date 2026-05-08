@@ -232,15 +232,34 @@ def _stream_host_output(proc: subprocess.Popen) -> None:
         print(f"[MapScreen] Failed to read host output for PID {proc.pid}: {exc}")
 
 
-def _launch_webview(html_path: str, x: int, y: int, w: int, h: int) -> Optional[subprocess.Popen]:
+def _launch_webview(
+    html_path: str,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    handle_path: Optional[str] = None,
+) -> Optional[subprocess.Popen]:
     """Launch map_webview_host.py as a subprocess. Embedding is done by us."""
     global _LAST_LAUNCH_ERROR
     _LAST_LAUNCH_ERROR = ""
     try:
+        cmd = [
+            sys.executable,
+            "-u",
+            str(_HOST_SCRIPT),
+            str(x),
+            str(y),
+            str(w),
+            str(h),
+            html_path,
+        ]
+        if handle_path:
+            cmd.append(handle_path)
+
         # -u: unbuffered IO so any host print() is visible immediately.
         proc = subprocess.Popen(
-            [sys.executable, "-u", str(_HOST_SCRIPT),
-             str(x), str(y), str(w), str(h), html_path],
+            cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -528,7 +547,7 @@ def _have_xdotool() -> bool:
 
 
 def _xdotool_search_pid(pid: int) -> int:
-    """Return the largest visible X11 window owned by `pid`, or 0."""
+    """Return the largest X11 window owned by `pid`, or 0."""
     if not _have_xdotool():
         return 0
     try:
@@ -702,12 +721,30 @@ _HIDDEN_X = -20000
 _HIDDEN_Y = -20000
 
 
+def _read_window_id_file(path: Optional[str]) -> int:
+    if not path or not os.path.exists(path):
+        return 0
+    try:
+        raw = Path(path).read_text(encoding="ascii").strip()
+        if not raw:
+            return 0
+        if raw.startswith("ERROR:"):
+            print(f"[MapHost] host could not publish XID: {raw[6:]}")
+            return -1
+        wid = int(raw)
+        return wid if wid > 0 else 0
+    except Exception as exc:
+        print(f"[MapHost] failed to read XID file {path}: {exc}")
+        return 0
+
+
 class MapHost:
     """Singleton owning the webview subprocess and its embedding state."""
 
     def __init__(self):
         self._proc: Optional[subprocess.Popen] = None
         self._html_path: Optional[str] = None
+        self._handle_path: Optional[str] = None
         self._wid: int = 0  # HWND on Windows, X11 wid on Linux
         self._parent: int = 0
         self._embedded: bool = False
@@ -732,6 +769,14 @@ class MapHost:
             fd, path = tempfile.mkstemp(suffix=".html", prefix="snowlink_map_")
             os.close(fd)
             self._html_path = path
+        if self._handle_path and os.path.exists(self._handle_path):
+            try:
+                os.unlink(self._handle_path)
+            except Exception:
+                pass
+        fd, path = tempfile.mkstemp(suffix=".xid", prefix="snowlink_map_")
+        os.close(fd)
+        self._handle_path = path
         with open(self._html_path, "w", encoding="utf-8") as f:
             f.write(_build_map_html(BOOT_LAT, BOOT_LON))
 
@@ -748,7 +793,12 @@ class MapHost:
         # Launch off-screen so the OS WM never paints the bare window before
         # we reparent it.
         self._proc = _launch_webview(
-            self._html_path, _HIDDEN_X, _HIDDEN_Y, self._init_w, self._init_h
+            self._html_path,
+            _HIDDEN_X,
+            _HIDDEN_Y,
+            self._init_w,
+            self._init_h,
+            self._handle_path,
         )
         self._embedded = False
         self._wid = 0
@@ -826,6 +876,12 @@ class MapHost:
             except Exception:
                 pass
             self._html_path = None
+        if self._handle_path and os.path.exists(self._handle_path):
+            try:
+                os.unlink(self._handle_path)
+            except Exception:
+                pass
+            self._handle_path = None
 
     # ── Internals ─────────────────────────────────────────────────────────
 
@@ -916,7 +972,11 @@ class MapHost:
         return None
 
     def _try_embed_linux(self) -> Optional[bool]:
-        wid = _xdotool_search_pid(self._proc.pid)
+        wid = _read_window_id_file(self._handle_path)
+        if wid < 0:
+            wid = _xdotool_search_pid(self._proc.pid)
+        elif not wid and self._embed_ticks > 10:
+            wid = _xdotool_search_pid(self._proc.pid)
         if not wid:
             if self._embed_ticks in (1, 5, 20, 50, 100):
                 print(f"[MapHost] embed tick {self._embed_ticks}: "
