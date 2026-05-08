@@ -1,12 +1,14 @@
 """
-Standalone pywebview host — launched as a subprocess by MapView.
+Standalone pywebview host — launched as a subprocess by MapHost.
 
 Usage: python map_webview_host.py <x> <y> <w> <h> <html_path>
 
-  x, y       : screen-absolute top-left for initial placement. Ignored on
-               Windows (host creates window off-screen; the Kivy parent
-               re-parents it into the Kivy HWND by PID).
-  w, h       : pixel dimensions of the map area
+  x, y       : ignored. Window is always created off-screen so the parent
+               can reparent it as a strict child before any visible frame
+               appears. Kept in argv for backward compatibility.
+  w, h       : pixel dimensions of the initial map area (chosen so MapLibre
+               lays out at a realistic resolution and starts loading the
+               right tile pyramid).
   html_path  : path to the generated MapLibre HTML file
 
 The Kivy parent process owns all embedding logic. This host process just
@@ -21,6 +23,12 @@ import sys
 import webview
 
 
+# Far off-screen — outside any plausible display geometry. Both Win32 and
+# X11 honour negative top-level coordinates; the WM may briefly try to
+# decorate it but the Kivy parent reparents it within ~100ms.
+_OFFSCREEN = (-32000, -32000)
+
+
 def main() -> None:
     if len(sys.argv) != 6:
         print(
@@ -29,17 +37,14 @@ def main() -> None:
         )
         sys.exit(1)
 
-    x, y      = int(sys.argv[1]), int(sys.argv[2])
     w, h      = int(sys.argv[3]), int(sys.argv[4])
     html_path = sys.argv[5]
 
     with open(html_path, "r", encoding="utf-8") as f:
         html = f.read()
 
-    # Create off-screen on Windows so the HWND exists immediately and the
-    # Kivy parent can reparent us before any visible top-level frame appears.
     on_windows = platform.system() == "Windows"
-    create_x, create_y = (-32000, -32000) if on_windows else (x, y)
+    create_x, create_y = _OFFSCREEN
 
     our_title = f"SnowLink Map {os.getpid()}"
 

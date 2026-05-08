@@ -1,21 +1,19 @@
 """
 MapScreen – 3D interactive map using MapLibre GL JS.
 
-Mirrors the Raven .NET approach: generates a MapLibre GL HTML page and
-displays it in a pywebview subprocess window (frameless) positioned exactly
-over the map area in the Kivy window — no visible OS chrome.
+The map is rendered by a single pywebview subprocess (WebKitGTK on Linux,
+EdgeChromium on Windows) launched at app start by ``MapHost``. The subprocess
+window is reparented as a strict child of the Kivy SDL2 window (override-redirect
+on X11, ``WS_CHILD`` on Win32) so it cannot be dragged or detached.
 
-MapLibre provides out-of-the-box:
-  • Kartverket topo tiles (same URL as Raven)
-  • 3D terrain via AWS Terrarium DEM tiles
-  • Hillshade layer
-  • Pan / tilt / zoom / rotate with touch or mouse
-  • Topo ↔ Aerial basemap switch
-  • Snowcat position marker
-
-Webview window lifecycle:
-  on_enter  → write HTML to temp file → launch map_webview_host.py subprocess
-  on_leave  → terminate subprocess
+Lifecycle:
+  App.on_start  → MapHost.ensure_started() launches subprocess offscreen and
+                  embeds it as a clipped child → map tiles preload immediately.
+  MapScreen.on_enter → MapHost.attach(view) moves the embedded child over the
+                       MapView area.
+  MapScreen.on_leave → MapHost.detach() moves the child back offscreen
+                       (still embedded, still alive).
+  App.on_stop   → MapHost.stop() terminates subprocess and cleans temp files.
 """
 
 from __future__ import annotations
@@ -519,91 +517,14 @@ def _move_child(child_hwnd: int, cx: int, cy: int, w: int, h: int) -> None:
         print(f"[MapScreen] SetWindowPos failed: {e}")
 
 
-# ─── Linux/Pi: Chromium + xdotool embedding ───────────────────────────────────
+# ─── Linux/Pi: xdotool embedding ──────────────────────────────────────────────
 
 def _is_linux() -> bool:
     return sys.platform.startswith("linux")
 
 
-def _chromium_executable() -> Optional[str]:
-    for name in ("chromium-browser", "chromium", "chromium-browser-stable",
-                 "google-chrome", "google-chrome-stable"):
-        path = shutil.which(name)
-        if path:
-            return path
-    return None
-
-
 def _have_xdotool() -> bool:
     return shutil.which("xdotool") is not None
-
-
-def _launch_chromium_linux(html_path: str, x: int, y: int,
-                           w: int, h: int) -> Optional[subprocess.Popen]:
-    """Launch Chromium in --app mode, frameless, positioned over the map area.
-
-    Forces XWayland (--ozone-platform=x11) so xdotool can find/reparent the
-    window even when the Pi runs the Wayland session by default.
-    """
-    global _LAST_LAUNCH_ERROR
-    _LAST_LAUNCH_ERROR = ""
-
-    exe = _chromium_executable()
-    if not exe:
-        _LAST_LAUNCH_ERROR = (
-            "chromium not found (install with: sudo apt-get install chromium)"
-        )
-        print(f"[MapScreen] {_LAST_LAUNCH_ERROR}")
-        return None
-
-    # Per-instance profile dir: keeps Chromium isolated, avoids
-    # "another instance is already running" when multiple windows exist.
-    user_data_dir = tempfile.mkdtemp(prefix="snowlink_chromium_")
-
-    args = [
-        exe,
-        f"--app=file://{html_path}",
-        f"--user-data-dir={user_data_dir}",
-        f"--window-position={x},{y}",
-        f"--window-size={w},{h}",
-        "--ozone-platform=x11",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--no-service-autorun",
-        "--disable-features=TranslateUI,InfiniteSessionRestore",
-        "--disable-pinch",
-        "--overscroll-history-navigation=0",
-        "--disable-session-crashed-bubble",
-        "--disable-infobars",
-        "--password-store=basic",
-        "--enable-gpu-rasterization",
-        "--ignore-gpu-blocklist",
-        "--enable-zero-copy",
-    ]
-
-    env = dict(os.environ)
-    env["GDK_BACKEND"] = "x11"
-
-    try:
-        proc = subprocess.Popen(
-            args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            env=env,
-        )
-        setattr(proc, "_snowlink_user_data_dir", user_data_dir)
-        threading.Thread(
-            target=_stream_host_output, args=(proc,), daemon=True,
-        ).start()
-        print(f"[MapScreen] Chromium PID {proc.pid} at ({x},{y}) {w}×{h} via {exe}")
-        return proc
-    except Exception as e:
-        shutil.rmtree(user_data_dir, ignore_errors=True)
-        _LAST_LAUNCH_ERROR = str(e)
-        print(f"[MapScreen] Failed to launch Chromium: {e}")
-        return None
 
 
 def _xdotool_search_pid(pid: int) -> int:
@@ -716,8 +637,14 @@ def _xdotool_set_override_redirect(wid: int) -> bool:
         return False
 
 
-def _embed_chromium_child_linux(wid: int, parent: int,
-                                cx: int, cy: int, w: int, h: int) -> bool:
+def _embed_x11_child(wid: int, parent: int,
+                     cx: int, cy: int, w: int, h: int) -> bool:
+    """Reparent ``wid`` as a strict (override-redirect) child of ``parent``.
+
+    Used for the pywebview WebKitGTK window on Linux. The unmap → set
+    override-redirect → reparent → map sequence is required so the WM never
+    decorates or tracks the window as a top-level.
+    """
     if not _have_xdotool() or not wid or not parent:
         return False
 
@@ -759,243 +686,115 @@ def _xdotool_raise(wid: int) -> None:
         pass
 
 
-# ─── MapView ──────────────────────────────────────────────────────────────────
+# ─── MapHost (app-level singleton) ────────────────────────────────────────────
+#
+# Owns the pywebview subprocess for the entire app lifetime. The subprocess is
+# launched at App.on_start() so map tiles preload while the user is on other
+# screens. The X11/Win32 child window is reparented into the Kivy SDL2 window
+# once and then simply repositioned (visible over MapView vs. clipped offscreen)
+# whenever the user enters or leaves MapScreen — never re-launched, never
+# detached. WebGL + tile cache state is preserved across screen changes.
 
-class MapView(FloatLayout):
-    """
-    Placeholder widget that occupies the map area in the Kivy layout.
+# Hidden offscreen position (parent-relative). Negative coords are clipped to
+# the parent's client area on both Win32 (WS_CHILD) and X11 (override-redirect),
+# so the child stays mapped (no tear-down) but is invisible.
+_HIDDEN_X = -20000
+_HIDDEN_Y = -20000
 
-    The actual map is rendered by a frameless pywebview subprocess window
-    positioned exactly on top of this widget.  The dark background here
-    is visible while the webview is loading.
-    """
 
-    def __init__(self, **kw):
-        super().__init__(**kw)
-        self._browser: Optional[subprocess.Popen] = None
-        self._html_path: Optional[str]            = None
-        self._child_hwnd: int                     = 0
-        self._embedded: bool                      = False
-        self._embed_event                         = None
-        self._host_monitor_event                  = None
-        self._sync_event                          = None
+class MapHost:
+    """Singleton owning the webview subprocess and its embedding state."""
 
-        # Dark background matching app theme
-        with self.canvas.before:
-            Color(0.055, 0.075, 0.145, 1)
-            self._bg = Rectangle(pos=self.pos, size=self.size)
-        self.bind(pos=self._update_bg, size=self._update_bg)
+    def __init__(self):
+        self._proc: Optional[subprocess.Popen] = None
+        self._html_path: Optional[str] = None
+        self._wid: int = 0  # HWND on Windows, X11 wid on Linux
+        self._parent: int = 0
+        self._embedded: bool = False
+        self._embed_ticks: int = 0
+        self._embed_event = None
+        self._monitor_event = None
+        self._sync_event = None
+        self._attached_view: Optional["MapView"] = None
+        # Initial offscreen launch size; chosen large so MapLibre lays out at a
+        # realistic resolution and starts loading the right tile pyramid.
+        self._init_w: int = 1280
+        self._init_h: int = 660
 
-        self._lbl = Label(
-            text="Loading 3D map…",
-            color=(0.0, 0.706, 0.847, 1),
-            font_size="18sp",
-            pos_hint={"center_x": 0.5, "center_y": 0.5},
-        )
-        self.add_widget(self._lbl)
+    # ── Public API ────────────────────────────────────────────────────────
 
-    def _update_bg(self, *_):
-        self._bg.pos  = self.pos
-        self._bg.size = self.size
-        # Keep the embedded child window aligned with this widget.
-        self._sync_child_geometry()
-
-    # ── Geometry ──────────────────────────────────────────────────────────
-
-    def _client_rect(self) -> tuple[int, int, int, int, int, int]:
-        """Return (screen_x, screen_y, w, h, client_x, client_y)."""
-        win_left = getattr(Window, "left", 0) or 0
-        win_top  = getattr(Window, "top",  0) or 0
-        abs_x, abs_y = self.to_window(0, 0, relative=False)
-        cx = int(abs_x)
-        cy = int(Window.height - abs_y - self.height)
-        return win_left + cx, win_top + cy, int(self.width), int(self.height), cx, cy
-
-    def _sync_child_geometry(self, *_):
-        if not self._embedded or not self._child_hwnd:
-            return
-        _, _, w, h, cx, cy = self._client_rect()
-        if _is_windows():
-            _move_child(self._child_hwnd, cx, cy, w, h)
-        elif _is_linux():
-            # After reparent, coords are relative to the parent X11 window.
-            _xdotool_move_resize(self._child_hwnd, cx, cy, w, h)
-
-    # ── Embedding poll ────────────────────────────────────────────────────
-
-    def _try_embed(self, _dt) -> Optional[bool]:
-        """Poll for the subprocess's top-level window and reparent it.
-
-        Used on both Windows (Win32 SetParent) and Linux (xdotool
-        windowreparent). Cancels itself once embedded or the subprocess dies.
-        """
-        if self._embedded:
-            return False
-        if not self._browser or self._browser.poll() is not None:
-            rc = self._browser.poll() if self._browser else None
-            print(f"[MapScreen] Subprocess gone (rc={rc}); stopping embed poll")
-            detail = _host_output_tail(self._browser.pid) if self._browser else ""
-            self._lbl.text = "Map failed to start.\n" + (detail or f"Exit code {rc}")
-            return False
-
-        self._embed_ticks = getattr(self, "_embed_ticks", 0) + 1
-
-        if _is_windows():
-            return self._try_embed_windows()
-        if _is_linux():
-            return self._try_embed_linux()
-        return False  # unsupported platform; stop polling
-
-    def _try_embed_windows(self) -> Optional[bool]:
-        hwnd = _find_toplevel_for_pid(self._browser.pid)
-        if not hwnd:
-            if self._embed_ticks in (1, 5, 20, 50, 100):
-                print(f"[MapScreen] embed tick {self._embed_ticks}: "
-                      f"no top-level window for PID {self._browser.pid} yet")
-            return  # keep polling
-
-        parent = _get_parent_hwnd()
-        print(f"[MapScreen] Found child HWND 0x{hwnd:x}; parent HWND 0x{parent:x}")
-        if not parent:
-            print("[MapScreen] Could not resolve Kivy parent HWND")
-            return False
-
-        _, _, w, h, cx, cy = self._client_rect()
-        if _reparent_into(hwnd, parent, cx, cy, w, h):
-            self._child_hwnd = hwnd
-            self._embedded   = True
-            self._lbl.text   = ""
-            print(f"[MapScreen] Embedded child HWND 0x{hwnd:x} into parent 0x{parent:x} "
-                  f"at client ({cx},{cy}) {w}×{h}")
-            for delay in (0.05, 0.2, 0.5, 1.0):
-                Clock.schedule_once(lambda _dt: self._sync_child_geometry(), delay)
-            return False
-        else:
-            print(f"[MapScreen] Reparent failed for HWND 0x{hwnd:x}; will retry")
+    def ensure_started(self) -> None:
+        """Launch the webview subprocess offscreen. Idempotent."""
+        if self._proc and self._proc.poll() is None:
             return
 
-    def _try_embed_linux(self) -> Optional[bool]:
-        wid = _xdotool_search_pid(self._browser.pid)
-        if not wid:
-            if self._embed_ticks in (1, 5, 20, 50, 100):
-                print(f"[MapScreen] embed tick {self._embed_ticks}: "
-                      f"no X11 window for PID {self._browser.pid} yet")
-            # Give up after ~15s of waiting; show diagnostic.
-            if self._embed_ticks > _EMBED_TIMEOUT_TICKS:
-                tail = _host_output_tail(self._browser.pid)
-                self._lbl.text = ("Map window not found.\n"
-                                  + (tail or "xdotool could not see Chromium."))
-                return False
-            return
-
-        parent = _kivy_x11_xid()
-        print(f"[MapScreen] Found Chromium X11 wid={wid}; Kivy parent xid={parent}")
-        _, _, w, h, cx, cy = self._client_rect()
-
-        if parent and _embed_chromium_child_linux(wid, parent, cx, cy, w, h):
-            print(f"[MapScreen] Embedded Chromium wid={wid} into Kivy xid={parent} "
-                  f"at client ({cx},{cy}) {w}×{h}")
-
-            self._child_hwnd = wid
-            self._embedded   = True
-            self._lbl.text   = ""
-
-            # Re-sync a few times in case Chromium adjusts its own geometry post-show.
-            for delay in (0.1, 0.3, 0.7, 1.5):
-                Clock.schedule_once(lambda _dt: self._sync_child_geometry(), delay)
-            return False  # stop polling
-
-        if self._embed_ticks in (1, 5, 20, 50, 100):
-            print(f"[MapScreen] embed tick {self._embed_ticks}: "
-                  f"Chromium wid={wid} is not a strict child yet")
-        if self._embed_ticks > _EMBED_TIMEOUT_TICKS:
-            _xdotool_unmap(wid)
-            tail = _host_output_tail(self._browser.pid)
-            self._lbl.text = (
-                "Map could not be embedded in the Kivy window.\n"
-                + (tail or "Chromium stayed as a top-level window.")
-            )
-            try:
-                self._browser.terminate()
-            except Exception:
-                pass
-            return False
-        return
-
-    # ── Lifecycle ─────────────────────────────────────────────────────────
-
-    def start(self):
-        """Launch the webview subprocess and embed it over this widget."""
-        if self._browser and self._browser.poll() is None:
-            return  # already running
-
-        # Write HTML to a persistent temp file (browser needs to read it)
         if self._html_path is None:
             fd, path = tempfile.mkstemp(suffix=".html", prefix="snowlink_map_")
             os.close(fd)
             self._html_path = path
-
-        html = _build_map_html(BOOT_LAT, BOOT_LON)
         with open(self._html_path, "w", encoding="utf-8") as f:
-            f.write(html)
+            f.write(_build_map_html(BOOT_LAT, BOOT_LON))
 
-        screen_x, screen_y, w, h, _cx, _cy = self._client_rect()
+        # Estimate a sensible initial size from the Kivy window dims (header
+        # ~70dp + navbar ~70dp). Falls back to defaults pre-build.
+        try:
+            win_w = int(getattr(Window, "width", 1280) or 1280)
+            win_h = int(getattr(Window, "height", 800) or 800)
+            self._init_w = max(640, win_w)
+            self._init_h = max(360, win_h - 140)
+        except Exception:
+            pass
 
-        if _is_windows():
-            self._browser = _launch_webview(self._html_path, screen_x, screen_y, w, h)
-        elif _is_linux():
-            self._browser = _launch_chromium_linux(
-                self._html_path, screen_x, screen_y, w, h
-            )
-        else:
-            self._browser = _launch_webview(self._html_path, screen_x, screen_y, w, h)
-
+        # Launch off-screen so the OS WM never paints the bare window before
+        # we reparent it.
+        self._proc = _launch_webview(
+            self._html_path, _HIDDEN_X, _HIDDEN_Y, self._init_w, self._init_h
+        )
         self._embedded = False
-        self._child_hwnd = 0
+        self._wid = 0
+        self._parent = 0
         self._embed_ticks = 0
 
-        if not self._browser:
-            self._lbl.text = "Map failed to start.\n" + (_LAST_LAUNCH_ERROR or "Check console output.")
+        if not self._proc:
+            print("[MapHost] webview subprocess failed to launch: "
+                  + (_LAST_LAUNCH_ERROR or "unknown"))
             return
 
-        self._lbl.text = "Loading 3D map…"
-
-        # Stay aligned on Kivy window resize/move.
         Window.bind(
             on_resize=self._on_window_change,
             on_restore=self._on_window_change,
             on_maximize=self._on_window_change,
         )
+        self._embed_event = Clock.schedule_interval(self._try_embed, 0.1)
+        self._monitor_event = Clock.schedule_interval(self._monitor_proc, 2.0)
+        # Lightweight sync: only does anything when an attached view exists.
+        self._sync_event = Clock.schedule_interval(
+            lambda _dt: self._sync_to_view(), 0.5
+        )
 
-        if _is_windows() or _is_linux():
-            # Poll a few times a second until the subprocess's top-level window
-            # exists, then reparent it. Stops itself once embedded.
-            self._embed_event = Clock.schedule_interval(self._try_embed, 0.1)
-            self._host_monitor_event = Clock.schedule_interval(
-                self._monitor_browser_process, 2.0
-            )
-            # Lightweight position sync (cheap; only runs when embedded).
-            self._sync_event  = Clock.schedule_interval(
-                lambda _dt: self._sync_child_geometry(), 0.5
-            )
+    def attach(self, view: "MapView") -> None:
+        """Bind the embedded child to ``view`` and move it over the view."""
+        self._attached_view = view
+        if self._embedded:
+            self._sync_to_view()
+            view.set_status("")
+        else:
+            view.set_status("Loading 3D map…")
 
-    def _on_window_change(self, *_):
-        Clock.schedule_once(lambda _dt: self._sync_child_geometry(), 0)
+    def detach(self) -> None:
+        """Hide the embedded child but keep the subprocess alive."""
+        self._attached_view = None
+        if self._embedded:
+            self._move_offscreen()
 
-    def _monitor_browser_process(self, _dt):
-        if not self._browser:
-            return False
-        rc = self._browser.poll()
-        if rc is None:
-            return True
-        tail = _host_output_tail(self._browser.pid)
-        self._lbl.text = "Map process exited.\n" + (tail or f"Exit code {rc}")
-        print(f"[MapScreen] Browser process exited after start (rc={rc})")
-        return False
+    def update_geometry(self, view: "MapView") -> None:
+        """Re-sync the child to ``view`` if it is currently attached."""
+        if self._attached_view is view and self._embedded:
+            self._sync_to_view()
 
-    def stop(self):
-        """Terminate the browser subprocess and tear down hooks."""
-        for ev_attr in ("_embed_event", "_host_monitor_event", "_sync_event"):
+    def stop(self) -> None:
+        """Terminate the subprocess and clean up. Called on app shutdown."""
+        for ev_attr in ("_embed_event", "_monitor_event", "_sync_event"):
             ev = getattr(self, ev_attr, None)
             if ev is not None:
                 try:
@@ -1011,39 +810,250 @@ class MapView(FloatLayout):
             )
         except Exception:
             pass
-        if self._browser:
-            user_data_dir = getattr(self._browser, "_snowlink_user_data_dir", None)
+        if self._proc:
             try:
-                self._browser.terminate()
+                self._proc.terminate()
             except Exception:
                 pass
-            self._browser = None
-            if user_data_dir and os.path.isdir(user_data_dir):
-                shutil.rmtree(user_data_dir, ignore_errors=True)
-        self._child_hwnd = 0
-        self._embedded   = False
-        self._lbl.text   = "Loading 3D map…"
-
-    def __del__(self):
-        self.stop()
+            self._proc = None
+        self._wid = 0
+        self._parent = 0
+        self._embedded = False
+        self._attached_view = None
         if self._html_path and os.path.exists(self._html_path):
             try:
                 os.unlink(self._html_path)
             except Exception:
                 pass
+            self._html_path = None
+
+    # ── Internals ─────────────────────────────────────────────────────────
+
+    def _move_offscreen(self) -> None:
+        if not self._wid:
+            return
+        w, h = self._init_w, self._init_h
+        if _is_windows():
+            _move_child(self._wid, _HIDDEN_X, _HIDDEN_Y, w, h)
+        elif _is_linux():
+            _xdotool_move_resize(self._wid, _HIDDEN_X, _HIDDEN_Y, w, h)
+
+    def _sync_to_view(self) -> None:
+        view = self._attached_view
+        if not view or not self._embedded or not self._wid:
+            return
+        _, _, w, h, cx, cy = view._client_rect()
+        if w <= 0 or h <= 0:
+            return
+        if _is_windows():
+            _move_child(self._wid, cx, cy, w, h)
+        elif _is_linux():
+            _xdotool_move_resize(self._wid, cx, cy, w, h)
+
+    def _on_window_change(self, *_):
+        Clock.schedule_once(lambda _dt: self._sync_to_view(), 0)
+
+    def _monitor_proc(self, _dt):
+        if not self._proc:
+            return False
+        rc = self._proc.poll()
+        if rc is None:
+            return True
+        tail = _host_output_tail(self._proc.pid)
+        msg = "Map process exited.\n" + (tail or f"Exit code {rc}")
+        print(f"[MapHost] webview process exited rc={rc}; {tail}")
+        if self._attached_view:
+            self._attached_view.set_status(msg)
+        return False
+
+    def _try_embed(self, _dt) -> Optional[bool]:
+        if self._embedded:
+            return False
+        if not self._proc or self._proc.poll() is not None:
+            print("[MapHost] subprocess gone before embed; stopping poll")
+            if self._attached_view:
+                self._attached_view.set_status(
+                    "Map failed to start.\n" + (_LAST_LAUNCH_ERROR or "")
+                )
+            return False
+
+        self._embed_ticks += 1
+        if _is_windows():
+            return self._try_embed_windows()
+        if _is_linux():
+            return self._try_embed_linux()
+        return False  # unsupported platform
+
+    def _try_embed_windows(self) -> Optional[bool]:
+        hwnd = _find_toplevel_for_pid(self._proc.pid)
+        if not hwnd:
+            if self._embed_ticks in (1, 5, 20, 50, 100):
+                print(f"[MapHost] embed tick {self._embed_ticks}: "
+                      f"no top-level for PID {self._proc.pid} yet")
+            if self._embed_ticks > _EMBED_TIMEOUT_TICKS:
+                if self._attached_view:
+                    self._attached_view.set_status(
+                        "Map window not found.\n" + _host_output_tail(self._proc.pid)
+                    )
+                return False
+            return None
+
+        parent = _get_parent_hwnd()
+        if not parent:
+            print("[MapHost] could not resolve Kivy parent HWND")
+            return False
+
+        # Embed offscreen first; attach() will reposition.
+        w, h = self._init_w, self._init_h
+        if _reparent_into(hwnd, parent, _HIDDEN_X, _HIDDEN_Y, w, h):
+            self._wid = hwnd
+            self._parent = parent
+            self._embedded = True
+            print(f"[MapHost] embedded child HWND 0x{hwnd:x} into parent 0x{parent:x}")
+            if self._attached_view:
+                Clock.schedule_once(lambda _dt: self._sync_to_view(), 0.05)
+            return False
+        return None
+
+    def _try_embed_linux(self) -> Optional[bool]:
+        wid = _xdotool_search_pid(self._proc.pid)
+        if not wid:
+            if self._embed_ticks in (1, 5, 20, 50, 100):
+                print(f"[MapHost] embed tick {self._embed_ticks}: "
+                      f"no X11 window for PID {self._proc.pid} yet")
+            if self._embed_ticks > _EMBED_TIMEOUT_TICKS:
+                if self._attached_view:
+                    self._attached_view.set_status(
+                        "Map window not found.\n" + _host_output_tail(self._proc.pid)
+                    )
+                return False
+            return None
+
+        parent = _kivy_x11_xid()
+        if not parent:
+            return None
+
+        w, h = self._init_w, self._init_h
+        if _embed_x11_child(wid, parent, _HIDDEN_X, _HIDDEN_Y, w, h):
+            self._wid = wid
+            self._parent = parent
+            self._embedded = True
+            print(f"[MapHost] embedded webview wid={wid} into Kivy xid={parent}")
+            # WebKitGTK on Pi often needs a geometry "wiggle" before it paints
+            # correctly (replaces the manual maximize/minimize hack).
+            for delay in (0.1, 0.3, 0.7, 1.5):
+                Clock.schedule_once(self._geometry_wiggle, delay)
+            if self._attached_view:
+                Clock.schedule_once(lambda _dt: self._sync_to_view(), 0.05)
+            return False
+
+        if self._embed_ticks > _EMBED_TIMEOUT_TICKS:
+            _xdotool_unmap(wid)
+            tail = _host_output_tail(self._proc.pid)
+            if self._attached_view:
+                self._attached_view.set_status(
+                    "Map could not be embedded in the Kivy window.\n" + tail
+                )
+            try:
+                self._proc.terminate()
+            except Exception:
+                pass
+            return False
+        return None
+
+    def _geometry_wiggle(self, _dt) -> None:
+        """Force WebKitGTK to recompute its drawing area after reparent."""
+        if not self._embedded or not self._wid:
+            return
+        view = self._attached_view
+        if view:
+            _, _, w, h, cx, cy = view._client_rect()
+        else:
+            w, h, cx, cy = self._init_w, self._init_h, _HIDDEN_X, _HIDDEN_Y
+        if w <= 1 or h <= 1:
+            return
+        if _is_linux():
+            _xdotool_move_resize(self._wid, cx, cy, max(2, w - 1), max(2, h - 1))
+            _xdotool_move_resize(self._wid, cx, cy, w, h)
+        elif _is_windows():
+            _move_child(self._wid, cx, cy, max(2, w - 1), max(2, h - 1))
+            _move_child(self._wid, cx, cy, w, h)
+
+
+_MAP_HOST: Optional[MapHost] = None
+
+
+def get_map_host() -> MapHost:
+    """Return the process-wide MapHost singleton."""
+    global _MAP_HOST
+    if _MAP_HOST is None:
+        _MAP_HOST = MapHost()
+    return _MAP_HOST
+
+
+# ─── MapView ──────────────────────────────────────────────────────────────────
+
+class MapView(FloatLayout):
+    """Placeholder widget over which the embedded webview is positioned.
+
+    All subprocess lifecycle lives in :class:`MapHost`; this widget only
+    publishes its geometry and forwards attach/detach when the screen is
+    entered or left.
+    """
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+
+        # Dark background visible while the webview is loading or hidden.
+        with self.canvas.before:
+            Color(0.055, 0.075, 0.145, 1)
+            self._bg = Rectangle(pos=self.pos, size=self.size)
+        self.bind(pos=self._update_bg, size=self._update_bg)
+
+        self._lbl = Label(
+            text="Loading 3D map…",
+            color=(0.0, 0.706, 0.847, 1),
+            font_size="18sp",
+            pos_hint={"center_x": 0.5, "center_y": 0.5},
+        )
+        self.add_widget(self._lbl)
+
+    def _update_bg(self, *_):
+        self._bg.pos = self.pos
+        self._bg.size = self.size
+        # Keep the embedded child window aligned with this widget.
+        get_map_host().update_geometry(self)
+
+    def _client_rect(self) -> tuple[int, int, int, int, int, int]:
+        """Return (screen_x, screen_y, w, h, client_x, client_y)."""
+        win_left = getattr(Window, "left", 0) or 0
+        win_top  = getattr(Window, "top",  0) or 0
+        abs_x, abs_y = self.to_window(0, 0, relative=False)
+        cx = int(abs_x)
+        cy = int(Window.height - abs_y - self.height)
+        return win_left + cx, win_top + cy, int(self.width), int(self.height), cx, cy
+
+    def set_status(self, text: str) -> None:
+        self._lbl.text = text
+
+    def attach(self) -> None:
+        get_map_host().attach(self)
+
+    def detach(self) -> None:
+        get_map_host().detach()
 
 
 # ─── MapScreen ────────────────────────────────────────────────────────────────
 
 class MapScreen(Screen):
-    """Map screen: header bar + MapLibre 3D map in subprocess browser."""
+    """Map screen: header bar + MapLibre 3D map (embedded webview)."""
 
     def on_enter(self):
         # Give Kivy one frame to finish layout so widget.pos/size are correct
         Clock.schedule_once(self._init, 0.1)
 
     def _init(self, _dt):
-        self.ids.map_view.start()
+        self.ids.map_view.attach()
         ds = DataService.get()
         self._on_connections()
         ds.bind(
@@ -1055,7 +1065,7 @@ class MapScreen(Screen):
         self._tick_clock(0)
 
     def on_leave(self):
-        self.ids.map_view.stop()
+        self.ids.map_view.detach()
         DataService.get().unbind(
             cellular_ok=self._on_connections,
             gps_ok=self._on_connections,

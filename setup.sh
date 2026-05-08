@@ -8,9 +8,9 @@ set -e
 echo ">>> Updating system packages..."
 sudo apt-get update -y
 
-# Map runtime: Chromium in --app mode + xdotool for X11 reparenting.
-# Forced via --ozone-platform=x11 so it works under the Pi's Wayland session
-# (XWayland) as well as classic X11.
+# Map runtime: pywebview backed by WebKitGTK. xdotool reparents the webview's
+# top-level X11 window into the Kivy SDL2 window as a strict (override-redirect)
+# child so it cannot be dragged or detached.
 BASE_PACKAGES=(
     make build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev \
     libsqlite3-dev wget curl llvm libncursesw5-dev xz-utils tk-dev \
@@ -19,11 +19,24 @@ BASE_PACKAGES=(
     libportmidi-dev libswscale-dev libavformat-dev libavcodec-dev \
     zlib1g-dev libgstreamer1.0-dev gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good libmtdev-dev xclip xsel \
-    chromium xdotool wmctrl \
+    xdotool wmctrl \
+    pkg-config libgirepository1.0-dev libcairo2-dev \
+    gir1.2-gtk-3.0 \
 )
 
 echo ">>> Installing base packages..."
 sudo apt-get install -y "${BASE_PACKAGES[@]}"
+
+# WebKitGTK introspection bindings: prefer 4.1 (Trixie/Bookworm), fall back to
+# 4.0 (Bullseye). pywebview auto-detects whichever is present at runtime.
+echo ">>> Installing WebKitGTK introspection..."
+sudo apt-get install -y gir1.2-webkit2-4.1 \
+    || sudo apt-get install -y gir1.2-webkit2-4.0 \
+    || {
+        echo "!!! Could not install gir1.2-webkit2-4.1 or 4.0."
+        echo "    pywebview will not be able to render the map."
+        exit 1
+    }
 
 # ── Ensure Python 3.11 via pyenv (Kivy requires <3.13) ───────────────────────
 PYTHON_VERSION="3.11.9"
@@ -50,13 +63,10 @@ echo ">>> Installing Python dependencies..."
 pip install --upgrade pip
 pip install -r requirements-pi.txt
 
-# Sanity check: chromium and xdotool must be on PATH for the map to embed.
-command -v chromium-browser >/dev/null 2>&1 || command -v chromium >/dev/null 2>&1 || {
-    echo "!!! chromium not found on PATH after install. Embedded map will not start."
-    exit 1
-}
+# Sanity check: xdotool must be on PATH for the map to embed as a strict child.
 command -v xdotool >/dev/null 2>&1 || {
-    echo "!!! xdotool not found on PATH. Map will open as a floating window."
+    echo "!!! xdotool not found on PATH. Map cannot be embedded."
+    exit 1
 }
 
 # ── Shared .desktop content ──────────────────────────────────────────────────

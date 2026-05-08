@@ -64,6 +64,17 @@ class SnowLinkApp(App):
             Builder.load_file(os.path.join(_KV_DIR, kv_file))
         return RootWidget()
 
+    def on_start(self):
+        # Launch the map webview subprocess as soon as the Kivy window exists
+        # so tiles preload while the user is on other screens. The first visit
+        # to MapScreen is then instant.
+        from app.screens.map_screen import get_map_host
+        get_map_host().ensure_started()
+
+    def on_stop(self):
+        from app.screens.map_screen import get_map_host
+        get_map_host().stop()
+
 
 if __name__ == "__main__":
     SnowLinkApp().run()
