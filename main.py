@@ -13,9 +13,10 @@ from kivy.config import Config  # noqa: E402 – must come before kivy.app
 
 # Target display: 10" 1280×800 touch screen.
 # Change fullscreen to '1' (or 'auto') on the Raspberry Pi.
+_fullscreen = "auto" if os.environ.get("SNOWLINK_FULLSCREEN") else "0"
 Config.set("graphics", "width",       "1280")
 Config.set("graphics", "height",      "800")
-Config.set("graphics", "fullscreen",  "0")
+Config.set("graphics", "fullscreen",  _fullscreen)
 Config.set("graphics", "resizable",   "0")
 Config.set("input",    "mouse",       "mouse,disable_multitouch")
 
