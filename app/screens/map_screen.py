@@ -25,6 +25,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -201,19 +202,59 @@ def _build_map_html(lat: float, lon: float) -> str:
 # ─── Webview host helpers ─────────────────────────────────────────────────────
 
 _HOST_SCRIPT = Path(__file__).parent.parent / "map_webview_host.py"
+_LAST_LAUNCH_ERROR = ""
+_HOST_OUTPUT: dict[int, list[str]] = {}
+
+
+def _remember_host_output(pid: int, line: str) -> None:
+    lines = _HOST_OUTPUT.setdefault(pid, [])
+    lines.append(line)
+    if len(lines) > 20:
+        del lines[:-20]
+
+
+def _host_output_tail(pid: int) -> str:
+    lines = _HOST_OUTPUT.get(pid, [])
+    return " | ".join(lines[-3:])
+
+
+def _stream_host_output(proc: subprocess.Popen) -> None:
+    if proc.stdout is None:
+        return
+    try:
+        for raw_line in proc.stdout:
+            line = raw_line.rstrip()
+            if not line:
+                continue
+            _remember_host_output(proc.pid, line)
+            print(f"[map_host:{proc.pid}] {line}")
+    except Exception as exc:
+        print(f"[MapScreen] Failed to read host output for PID {proc.pid}: {exc}")
 
 
 def _launch_webview(html_path: str, x: int, y: int, w: int, h: int) -> Optional[subprocess.Popen]:
     """Launch map_webview_host.py as a subprocess. Embedding is done by us."""
+    global _LAST_LAUNCH_ERROR
+    _LAST_LAUNCH_ERROR = ""
     try:
         # -u: unbuffered IO so any host print() is visible immediately.
         proc = subprocess.Popen(
             [sys.executable, "-u", str(_HOST_SCRIPT),
              str(x), str(y), str(w), str(h), html_path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
         )
+        threading.Thread(
+            target=_stream_host_output,
+            args=(proc,),
+            daemon=True,
+        ).start()
         print(f"[MapScreen] Webview PID {proc.pid} at ({x},{y}) {w}×{h}")
         return proc
     except Exception as e:
+        _LAST_LAUNCH_ERROR = str(e)
         print(f"[MapScreen] Failed to launch webview host: {e}")
         return None
 
@@ -494,6 +535,7 @@ class MapView(FloatLayout):
         self._child_hwnd: int                     = 0
         self._embedded: bool                      = False
         self._embed_event                         = None
+        self._host_monitor_event                  = None
         self._sync_event                          = None
 
         # Dark background matching app theme
@@ -532,6 +574,43 @@ class MapView(FloatLayout):
             return
         _, _, w, h, cx, cy = self._client_rect()
         _move_child(self._child_hwnd, cx, cy, w, h)
+
+    def _confirm_non_windows_host(self, _dt):
+        """On Linux/Pi, the map stays as a separate overlay window.
+
+        Confirm the subprocess is still alive and clear the placeholder so the
+        user is not left with a permanent loading label in the Kivy view.
+        """
+        if _is_windows():
+            return
+        if not self._browser:
+            return
+
+        rc = self._browser.poll()
+        if rc is None:
+            self._lbl.text = ""
+            print("[MapScreen] Non-Windows map host is running")
+            self._host_monitor_event = Clock.schedule_interval(
+                self._monitor_non_windows_host, 1.0
+            )
+            return
+
+        detail = _host_output_tail(self._browser.pid)
+        self._lbl.text = "Map failed to start.\n" + (detail or f"Exit code {rc}")
+        print(f"[MapScreen] Non-Windows map host exited early with code {rc}: {detail}")
+
+    def _monitor_non_windows_host(self, _dt):
+        if _is_windows() or not self._browser:
+            return False
+
+        rc = self._browser.poll()
+        if rc is None:
+            return True
+
+        detail = _host_output_tail(self._browser.pid)
+        self._lbl.text = "Map stopped.\n" + (detail or f"Exit code {rc}")
+        print(f"[MapScreen] Non-Windows map host stopped with code {rc}: {detail}")
+        return False
 
     # ── Embedding poll ────────────────────────────────────────────────────
 
@@ -599,7 +678,7 @@ class MapView(FloatLayout):
         self._embed_ticks = 0
 
         if not self._browser:
-            self._lbl.text = "pywebview not available.\nRun: pip install pywebview"
+            self._lbl.text = "Map failed to start.\n" + (_LAST_LAUNCH_ERROR or "Check console output.")
             return
 
         self._lbl.text = "Loading 3D map…"
@@ -619,13 +698,15 @@ class MapView(FloatLayout):
             self._sync_event  = Clock.schedule_interval(
                 lambda _dt: self._sync_child_geometry(), 0.5
             )
+        else:
+            Clock.schedule_once(self._confirm_non_windows_host, 0.75)
 
     def _on_window_change(self, *_):
         Clock.schedule_once(lambda _dt: self._sync_child_geometry(), 0)
 
     def stop(self):
         """Terminate the browser subprocess and tear down hooks."""
-        for ev_attr in ("_embed_event", "_sync_event"):
+        for ev_attr in ("_embed_event", "_host_monitor_event", "_sync_event"):
             ev = getattr(self, ev_attr, None)
             if ev is not None:
                 try:

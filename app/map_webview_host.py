@@ -43,17 +43,27 @@ def main() -> None:
 
     our_title = f"SnowLink Map {os.getpid()}"
 
-    webview.create_window(
-        our_title,
-        html=html,
-        x=create_x, y=create_y, width=w, height=h,
-        frameless=True,
-        background_color="#0e1b30",
-        easy_drag=False,
-        min_size=(100, 100),
+    print(
+        f"[map_webview_host] creating window title={our_title!r} "
+        f"platform={platform.system()} pos=({create_x},{create_y}) size=({w}x{h})"
     )
 
-    webview.start(debug=False)
+    try:
+        webview.create_window(
+            our_title,
+            html=html,
+            x=create_x, y=create_y, width=w, height=h,
+            frameless=True,
+            on_top=not on_windows,
+            background_color="#0e1b30",
+            easy_drag=False,
+            min_size=(100, 100),
+        )
+
+        webview.start(debug=False)
+    except Exception as exc:
+        print(f"[map_webview_host] failed to start: {exc}", file=sys.stderr)
+        raise
 
 
 if __name__ == "__main__":
