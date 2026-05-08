@@ -5,9 +5,24 @@
 # ============================================================
 set -e
 
+has_apt_package() {
+    apt-cache show "$1" >/dev/null 2>&1
+}
+
+first_available_package() {
+    for package in "$@"; do
+        if has_apt_package "$package"; then
+            printf '%s\n' "$package"
+            return 0
+        fi
+    done
+    return 1
+}
+
 echo ">>> Updating system packages..."
 sudo apt-get update -y
-sudo apt-get install -y \
+
+BASE_PACKAGES=(
     make build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev \
     libsqlite3-dev wget curl llvm libncursesw5-dev xz-utils tk-dev \
     libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev \
@@ -15,9 +30,32 @@ sudo apt-get install -y \
     libportmidi-dev libswscale-dev libavformat-dev libavcodec-dev \
     zlib1g-dev libgstreamer1.0-dev gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good libmtdev-dev xclip xsel \
-    chromium-browser \
     python3-gi python3-gi-cairo gir1.2-gtk-3.0 \
-    gir1.2-webkit2-4.0 libwebkit2gtk-4.0-dev
+)
+
+BROWSER_PACKAGE="$(first_available_package chromium chromium-browser || true)"
+WEBKIT_GIR_PACKAGE="$(first_available_package gir1.2-webkit2-4.1 gir1.2-webkit2-4.0 || true)"
+WEBKIT_DEV_PACKAGE="$(first_available_package libwebkit2gtk-4.1-dev libwebkit2gtk-4.0-dev || true)"
+
+if [ -z "$BROWSER_PACKAGE" ]; then
+    echo ">>> Could not find a Chromium package in apt repositories."
+    echo "    Expected one of: chromium, chromium-browser"
+    exit 1
+fi
+
+if [ -z "$WEBKIT_GIR_PACKAGE" ]; then
+    echo ">>> Could not find a WebKit GTK GIR package in apt repositories."
+    echo "    Expected one of: gir1.2-webkit2-4.1, gir1.2-webkit2-4.0"
+    exit 1
+fi
+
+EXTRA_PACKAGES=("$BROWSER_PACKAGE" "$WEBKIT_GIR_PACKAGE")
+if [ -n "$WEBKIT_DEV_PACKAGE" ]; then
+    EXTRA_PACKAGES+=("$WEBKIT_DEV_PACKAGE")
+fi
+
+echo ">>> Installing browser/runtime packages: $BROWSER_PACKAGE $WEBKIT_GIR_PACKAGE${WEBKIT_DEV_PACKAGE:+ $WEBKIT_DEV_PACKAGE}"
+sudo apt-get install -y "${BASE_PACKAGES[@]}" "${EXTRA_PACKAGES[@]}"
 
 # ── Ensure Python 3.11 via pyenv (Kivy requires <3.13) ───────────────────────
 PYTHON_VERSION="3.11.9"
