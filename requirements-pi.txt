@@ -1,7 +1,9 @@
 # SnowLink - Raspberry Pi Requirements
-# Tested on Raspberry Pi OS Bullseye / Bookworm
+# Tested on Raspberry Pi OS Bullseye / Bookworm / Trixie
+#
+# The map renderer on Pi is Chromium in --app mode (installed via apt by
+# setup.sh), so we do NOT need pywebview / WebKitGTK / PyGObject here.
 
 kivy==2.3.0
 Pillow>=10.0.0
 httpx>=0.24.0
-pywebview>=4.0
