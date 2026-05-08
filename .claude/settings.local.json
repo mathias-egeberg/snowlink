@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"M:\\\\Programming\\\\Prosjekter\\\\snowlink\" -Recurse -Force)",
+      "Bash(Select-Object -First 100)",
+      "Bash(Format-Table -AutoSize FullName)",
+      "Bash(Get-ChildItem -Path \"M:\\\\Programming\\\\Prosjekter\" -Filter \"*Raven*\" -Directory -ErrorAction SilentlyContinue)",
+      "Bash(Select-Object FullName)",
+      "Bash(xargs grep -l \"ravenassets\\\\|GetLocalTileUrl\")",
+      "Bash(Get-ChildItem -Path \"M:\\\\Programming\\\\Prosjekter\\\\Raven_\\\\Desktop\" -Recurse -Include \"*.cs\", \"*.json\")",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Sort-Object)",
+      "Bash(python -c \"import webview; print\\('pywebview', webview.__version__\\)\")",
+      "Bash(pip install *)",
+      "Bash(where python *)",
+      "Bash(venv\\\\Scripts\\\\pip.exe install *)"
+    ]
+  }
+}

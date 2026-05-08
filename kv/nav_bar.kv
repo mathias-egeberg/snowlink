@@ -71,6 +71,11 @@
         on_release: root.go_to('dashboard')
 
     NavButton:
+        text: 'Map'
+        is_active: root.active_tab == 'map'
+        on_release: root.go_to('map')
+
+    NavButton:
         text: 'Control'
         is_active: root.active_tab == 'control'
         on_release: root.go_to('control')

@@ -1,0 +1,174 @@
+#:import MapView app.screens.map_screen.MapView
+
+<MapScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        spacing: 0
+
+        # ── Header bar ────────────────────────────────────────────────────
+        BoxLayout:
+            orientation: 'horizontal'
+            size_hint_y: None
+            height: '70dp'
+            padding: '24dp', '10dp'
+            spacing: '12dp'
+            canvas.before:
+                Color:
+                    rgba: 0.086, 0.129, 0.243, 1
+                Rectangle:
+                    pos: self.pos
+                    size: self.size
+                # Bottom divider
+                Color:
+                    rgba: 0.0, 0.706, 0.847, 0.3
+                Line:
+                    points: [self.x, self.y, self.right, self.y]
+                    width: 1
+
+            # Screen title
+            Label:
+                text: 'Map'
+                font_size: '24sp'
+                bold: True
+                color: 0.0, 0.706, 0.847, 1
+                size_hint_x: None
+                width: '120dp'
+                halign: 'left'
+                valign: 'middle'
+                text_size: self.size
+
+            # Coordinates sub-label
+            Label:
+                text: '60.0137563 N  11.0196226 E'
+                font_size: '13sp'
+                color: 0.612, 0.639, 0.686, 1
+                halign: 'left'
+                valign: 'middle'
+                text_size: self.size
+
+            # Spacer
+            Widget:
+
+            # Connection status indicators
+            ConnIndicator:
+                id: ind_5g
+                label: '5G'
+                icon_type: '5g'
+
+            ConnIndicator:
+                id: ind_gps
+                label: 'GPS'
+                icon_type: 'gps'
+
+            ConnIndicator:
+                id: ind_imu
+                label: 'IMU'
+                icon_type: 'imu'
+
+            # Clock + date
+            BoxLayout:
+                orientation: 'vertical'
+                size_hint_x: None
+                width: '210dp'
+
+                Label:
+                    id: lbl_time_map
+                    text: '--:--:--'
+                    font_size: '22sp'
+                    bold: True
+                    color: 0.910, 0.910, 0.910, 1
+                    halign: 'right'
+                    valign: 'bottom'
+                    text_size: self.size
+
+                Label:
+                    id: lbl_date_map
+                    text: '---'
+                    font_size: '12sp'
+                    color: 0.612, 0.639, 0.686, 1
+                    halign: 'right'
+                    valign: 'top'
+                    text_size: self.size
+
+            ExitButton:
+
+        # ── 3D Map render area ────────────────────────────────────────────
+        FloatLayout:
+            canvas.before:
+                Color:
+                    rgba: 0.055, 0.075, 0.145, 1
+                Rectangle:
+                    pos: self.pos
+                    size: self.size
+
+            MapView:
+                id: map_view
+                size_hint: 1, 1
+                pos_hint: {'x': 0, 'y': 0}
+
+            # Compass rose (top-right corner)
+            BoxLayout:
+                orientation: 'vertical'
+                size_hint: None, None
+                size: '64dp', '64dp'
+                pos_hint: {'right': 0.99, 'top': 0.98}
+                canvas.before:
+                    Color:
+                        rgba: 0.086, 0.129, 0.243, 0.75
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(8)]
+
+                Label:
+                    text: 'N'
+                    font_size: '20sp'
+                    bold: True
+                    color: 0.0, 0.706, 0.847, 1
+                    halign: 'center'
+                    valign: 'middle'
+                    text_size: self.size
+
+            # Coordinate overlay (bottom-left)
+            BoxLayout:
+                orientation: 'vertical'
+                size_hint: None, None
+                size: '220dp', '52dp'
+                pos_hint: {'x': 0.01, 'y': 0.01}
+                padding: '10dp', '6dp'
+                canvas.before:
+                    Color:
+                        rgba: 0.086, 0.129, 0.243, 0.8
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(8)]
+
+                Label:
+                    text: '\u25c9  Boot position'
+                    font_size: '13sp'
+                    bold: True
+                    color: 0.0, 0.706, 0.847, 1
+                    halign: 'left'
+                    valign: 'middle'
+                    text_size: self.size
+
+                Label:
+                    text: '60.0137563 N  11.0196226 E'
+                    font_size: '11sp'
+                    color: 0.612, 0.639, 0.686, 1
+                    halign: 'left'
+                    valign: 'middle'
+                    text_size: self.size
+
+            # Hint: drag / pinch
+            Label:
+                text: 'Drag to pan  \u2022  Pinch to zoom'
+                font_size: '11sp'
+                color: 0.612, 0.639, 0.686, 0.7
+                size_hint: None, None
+                size: '220dp', '24dp'
+                pos_hint: {'center_x': 0.5, 'y': 0.01}
+                halign: 'center'
+                valign: 'middle'
+                text_size: self.size

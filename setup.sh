@@ -14,7 +14,10 @@ sudo apt-get install -y \
     libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
     libportmidi-dev libswscale-dev libavformat-dev libavcodec-dev \
     zlib1g-dev libgstreamer1.0-dev gstreamer1.0-plugins-base \
-    gstreamer1.0-plugins-good libmtdev-dev xclip xsel
+    gstreamer1.0-plugins-good libmtdev-dev xclip xsel \
+    chromium-browser \
+    python3-gi python3-gi-cairo gir1.2-gtk-3.0 \
+    gir1.2-webkit2-4.0 libwebkit2gtk-4.0-dev
 
 # ── Ensure Python 3.11 via pyenv (Kivy requires <3.13) ───────────────────────
 PYTHON_VERSION="3.11.9"
