@@ -205,6 +205,7 @@ def _build_map_html(lat: float, lon: float) -> str:
 _HOST_SCRIPT = Path(__file__).parent.parent / "map_webview_host.py"
 _LAST_LAUNCH_ERROR = ""
 _HOST_OUTPUT: dict[int, list[str]] = {}
+_EMBED_TIMEOUT_TICKS = 150
 
 
 def _remember_host_output(pid: int, line: str) -> None:
@@ -550,7 +551,7 @@ def _launch_chromium_linux(html_path: str, x: int, y: int,
     exe = _chromium_executable()
     if not exe:
         _LAST_LAUNCH_ERROR = (
-            "chromium not found (install with: sudo apt-get install chromium-browser)"
+            "chromium not found (install with: sudo apt-get install chromium)"
         )
         print(f"[MapScreen] {_LAST_LAUNCH_ERROR}")
         return None
@@ -592,12 +593,14 @@ def _launch_chromium_linux(html_path: str, x: int, y: int,
             bufsize=1,
             env=env,
         )
+        setattr(proc, "_snowlink_user_data_dir", user_data_dir)
         threading.Thread(
             target=_stream_host_output, args=(proc,), daemon=True,
         ).start()
         print(f"[MapScreen] Chromium PID {proc.pid} at ({x},{y}) {w}×{h} via {exe}")
         return proc
     except Exception as e:
+        shutil.rmtree(user_data_dir, ignore_errors=True)
         _LAST_LAUNCH_ERROR = str(e)
         print(f"[MapScreen] Failed to launch Chromium: {e}")
         return None
@@ -672,6 +675,64 @@ def _xdotool_reparent(child: int, parent: int) -> bool:
         return False
 
 
+def _xdotool_unmap(wid: int) -> bool:
+    if not _have_xdotool() or not wid:
+        return False
+    try:
+        subprocess.check_call(
+            ["xdotool", "windowunmap", str(wid)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _xdotool_map(wid: int) -> bool:
+    if not _have_xdotool() or not wid:
+        return False
+    try:
+        subprocess.check_call(
+            ["xdotool", "windowmap", "--sync", str(wid)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2,
+        )
+        return True
+    except Exception as e:
+        print(f"[MapScreen] xdotool windowmap failed: {e}")
+        return False
+
+
+def _xdotool_set_override_redirect(wid: int) -> bool:
+    if not _have_xdotool() or not wid:
+        return False
+    try:
+        subprocess.check_call(
+            ["xdotool", "set_window", "--overrideredirect", "1", str(wid)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2,
+        )
+        return True
+    except Exception as e:
+        print(f"[MapScreen] xdotool set_window overrideredirect failed: {e}")
+        return False
+
+
+def _embed_chromium_child_linux(wid: int, parent: int,
+                                cx: int, cy: int, w: int, h: int) -> bool:
+    if not _have_xdotool() or not wid or not parent:
+        return False
+
+    _xdotool_unmap(wid)
+    if not _xdotool_set_override_redirect(wid):
+        return False
+    if not _xdotool_reparent(wid, parent):
+        return False
+    _xdotool_move_resize(wid, cx, cy, w, h)
+    if not _xdotool_map(wid):
+        return False
+    _xdotool_move_resize(wid, cx, cy, w, h)
+    return True
+
+
 def _xdotool_move_resize(wid: int, x: int, y: int, w: int, h: int) -> None:
     if not _have_xdotool() or not wid:
         return
@@ -682,8 +743,8 @@ def _xdotool_move_resize(wid: int, x: int, y: int, w: int, h: int) -> None:
              "windowsize", "--sync", str(wid), str(w), str(h)],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[MapScreen] xdotool move/resize wid={wid} failed: {e}")
 
 
 def _xdotool_raise(wid: int) -> None:
@@ -762,7 +823,7 @@ class MapView(FloatLayout):
 
     # ── Embedding poll ────────────────────────────────────────────────────
 
-    def _try_embed(self, _dt):
+    def _try_embed(self, _dt) -> Optional[bool]:
         """Poll for the subprocess's top-level window and reparent it.
 
         Used on both Windows (Win32 SetParent) and Linux (xdotool
@@ -785,7 +846,7 @@ class MapView(FloatLayout):
             return self._try_embed_linux()
         return False  # unsupported platform; stop polling
 
-    def _try_embed_windows(self):
+    def _try_embed_windows(self) -> Optional[bool]:
         hwnd = _find_toplevel_for_pid(self._browser.pid)
         if not hwnd:
             if self._embed_ticks in (1, 5, 20, 50, 100):
@@ -813,14 +874,14 @@ class MapView(FloatLayout):
             print(f"[MapScreen] Reparent failed for HWND 0x{hwnd:x}; will retry")
             return
 
-    def _try_embed_linux(self):
+    def _try_embed_linux(self) -> Optional[bool]:
         wid = _xdotool_search_pid(self._browser.pid)
         if not wid:
             if self._embed_ticks in (1, 5, 20, 50, 100):
                 print(f"[MapScreen] embed tick {self._embed_ticks}: "
                       f"no X11 window for PID {self._browser.pid} yet")
             # Give up after ~15s of waiting; show diagnostic.
-            if self._embed_ticks > 150:
+            if self._embed_ticks > _EMBED_TIMEOUT_TICKS:
                 tail = _host_output_tail(self._browser.pid)
                 self._lbl.text = ("Map window not found.\n"
                                   + (tail or "xdotool could not see Chromium."))
@@ -831,31 +892,35 @@ class MapView(FloatLayout):
         print(f"[MapScreen] Found Chromium X11 wid={wid}; Kivy parent xid={parent}")
         _, _, w, h, cx, cy = self._client_rect()
 
-        reparented = False
-        if parent:
-            reparented = _xdotool_reparent(wid, parent)
-
-        if reparented:
-            # After reparent, coords are parent-relative.
-            _xdotool_move_resize(wid, cx, cy, w, h)
+        if parent and _embed_chromium_child_linux(wid, parent, cx, cy, w, h):
             print(f"[MapScreen] Embedded Chromium wid={wid} into Kivy xid={parent} "
                   f"at client ({cx},{cy}) {w}×{h}")
-        else:
-            # Fallback: pinned overlay using screen-absolute coords.
-            screen_x, screen_y, _, _, _, _ = self._client_rect()
-            _xdotool_move_resize(wid, screen_x, screen_y, w, h)
-            _xdotool_raise(wid)
-            print(f"[MapScreen] Reparent unavailable; pinned Chromium wid={wid} "
-                  f"at screen ({screen_x},{screen_y}) {w}×{h}")
 
-        self._child_hwnd = wid
-        self._embedded   = True
-        self._lbl.text   = ""
+            self._child_hwnd = wid
+            self._embedded   = True
+            self._lbl.text   = ""
 
-        # Re-sync a few times in case Chromium adjusts its own geometry post-show.
-        for delay in (0.1, 0.3, 0.7, 1.5):
-            Clock.schedule_once(lambda _dt: self._sync_child_geometry(), delay)
-        return False  # stop polling
+            # Re-sync a few times in case Chromium adjusts its own geometry post-show.
+            for delay in (0.1, 0.3, 0.7, 1.5):
+                Clock.schedule_once(lambda _dt: self._sync_child_geometry(), delay)
+            return False  # stop polling
+
+        if self._embed_ticks in (1, 5, 20, 50, 100):
+            print(f"[MapScreen] embed tick {self._embed_ticks}: "
+                  f"Chromium wid={wid} is not a strict child yet")
+        if self._embed_ticks > _EMBED_TIMEOUT_TICKS:
+            _xdotool_unmap(wid)
+            tail = _host_output_tail(self._browser.pid)
+            self._lbl.text = (
+                "Map could not be embedded in the Kivy window.\n"
+                + (tail or "Chromium stayed as a top-level window.")
+            )
+            try:
+                self._browser.terminate()
+            except Exception:
+                pass
+            return False
+        return
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -906,6 +971,9 @@ class MapView(FloatLayout):
             # Poll a few times a second until the subprocess's top-level window
             # exists, then reparent it. Stops itself once embedded.
             self._embed_event = Clock.schedule_interval(self._try_embed, 0.1)
+            self._host_monitor_event = Clock.schedule_interval(
+                self._monitor_browser_process, 2.0
+            )
             # Lightweight position sync (cheap; only runs when embedded).
             self._sync_event  = Clock.schedule_interval(
                 lambda _dt: self._sync_child_geometry(), 0.5
@@ -913,6 +981,17 @@ class MapView(FloatLayout):
 
     def _on_window_change(self, *_):
         Clock.schedule_once(lambda _dt: self._sync_child_geometry(), 0)
+
+    def _monitor_browser_process(self, _dt):
+        if not self._browser:
+            return False
+        rc = self._browser.poll()
+        if rc is None:
+            return True
+        tail = _host_output_tail(self._browser.pid)
+        self._lbl.text = "Map process exited.\n" + (tail or f"Exit code {rc}")
+        print(f"[MapScreen] Browser process exited after start (rc={rc})")
+        return False
 
     def stop(self):
         """Terminate the browser subprocess and tear down hooks."""
@@ -933,11 +1012,14 @@ class MapView(FloatLayout):
         except Exception:
             pass
         if self._browser:
+            user_data_dir = getattr(self._browser, "_snowlink_user_data_dir", None)
             try:
                 self._browser.terminate()
             except Exception:
                 pass
             self._browser = None
+            if user_data_dir and os.path.isdir(user_data_dir):
+                shutil.rmtree(user_data_dir, ignore_errors=True)
         self._child_hwnd = 0
         self._embedded   = False
         self._lbl.text   = "Loading 3D map…"
