@@ -198,30 +198,51 @@ class _WebkitHost:
     """
 
     def __init__(self):
-        self._loop: Optional[object] = None
-        self._win:  Optional[object] = None
+        self._win: Optional[object] = None
+        self._available: Optional[bool] = None  # None = untested
 
-    def start(self, html: str, x: int, y: int, w: int, h: int) -> bool:
-        """
-        Load *html* in a new frameless WebKit2 window at screen position
-        (x, y) with size (w, h).  Returns False if webkit2gtk is missing.
-        """
+    def _gtk_available(self) -> bool:
+        if self._available is not None:
+            return self._available
         try:
             import gi
             gi.require_version("Gtk", "3.0")
             gi.require_version("WebKit2", "4.1")
             from gi.repository import GLib, Gtk, WebKit2  # noqa: F401
+            self._available = True
         except (ImportError, ValueError):
+            self._available = False
+        return self._available
+
+    def show(self, html: str, x: int, y: int, w: int, h: int) -> bool:
+        """
+        First call: create a frameless WebKit2 window on a GLib daemon thread.
+        Subsequent calls: just move, resize, and show the existing window.
+        Returns False if webkit2gtk is unavailable.
+        """
+        if not self._gtk_available():
             return False
 
         from gi.repository import GLib, Gtk, WebKit2
 
+        if self._win is not None:
+            # Window already exists — reposition and reveal it
+            win = self._win
+            def _reshow():
+                win.move(x, y)
+                win.resize(w, h)
+                win.show_all()
+                return False
+            GLib.idle_add(_reshow)
+            return True
+
+        # First visit: create the GTK window on a daemon thread that runs
+        # its own GLib main loop.  The loop (and thread) live for the entire
+        # lifetime of the process — we never destroy the WebView, only hide it.
         loop = GLib.MainLoop()
-        self._loop = loop
 
         def _gtk_thread():
-            def _build(_html, _x, _y, _w, _h):
-                # WebGL settings
+            def _build():
                 settings = WebKit2.Settings()
                 settings.set_enable_webgl(True)
                 settings.set_enable_javascript(True)
@@ -231,53 +252,43 @@ class _WebkitHost:
                 )
 
                 wv = WebKit2.WebView.new_with_settings(settings)
-                # load_html() avoids any temp files
-                wv.load_html(_html, "file:///")
+                wv.load_html(html, "file:///")
 
                 win = Gtk.Window()
                 win.set_decorated(False)
                 win.set_skip_taskbar_hint(True)
                 win.set_skip_pager_hint(True)
-                win.set_default_size(_w, _h)
+                win.set_default_size(w, h)
                 win.add(wv)
 
-                # realize() creates the underlying GDK/X11 window so we can
-                # call set_override_redirect() before the window is mapped.
+                # Set override_redirect before mapping so the window manager
+                # never touches this window (no title bar, no decorations).
                 win.realize()
                 win.get_window().set_override_redirect(True)
 
-                win.move(_x, _y)
+                win.move(x, y)
                 win.show_all()
 
                 self._win = win
-                return False  # GLib.idle_add: don't repeat
+                return False  # don't repeat
 
-            GLib.idle_add(_build, html, x, y, w, h)
-            loop.run()
+            GLib.idle_add(_build)
+            loop.run()  # runs until process exits
 
         threading.Thread(target=_gtk_thread, daemon=True).start()
         return True
 
-    def stop(self):
-        """Destroy the window and quit the GLib main loop."""
-        loop = self._loop
-        win  = self._win
-        self._loop = None
-        self._win  = None
-
-        if loop is None:
+    def hide(self) -> None:
+        """
+        Hide the WebKit window instantly.  The GTK thread and WebView stay
+        alive so re-entering the map screen is instant with no teardown risk.
+        """
+        if self._win is None:
             return
-
         try:
             from gi.repository import GLib
-
-            def _teardown():
-                if win is not None:
-                    win.destroy()
-                loop.quit()
-                return False
-
-            GLib.idle_add(_teardown)
+            win = self._win
+            GLib.idle_add(win.hide)
         except ImportError:
             pass
 
@@ -322,7 +333,7 @@ class MapScreen(Screen):
         screen_y = win_top  + int(Window.height - win_y_bot - ph.height)
 
         html = _build_map_html(BOOT_LAT, BOOT_LON)
-        ok = self._webkit.start(
+        ok = self._webkit.show(
             html,
             screen_x, screen_y,
             int(ph.width), int(ph.height),
@@ -341,7 +352,7 @@ class MapScreen(Screen):
         )
         if hasattr(self, "_clock"):
             self._clock.cancel()
-        self._webkit.stop()
+        self._webkit.hide()
 
     # ── Data bindings ─────────────────────────────────────────────────────────
 
