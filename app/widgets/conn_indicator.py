@@ -14,23 +14,31 @@ class ConnIndicator(BoxLayout):
         is_ok     – True = green (connected), False = grey (disconnected)
     """
 
-    label     = StringProperty("")
-    icon_type = StringProperty("5g")
-    is_ok     = BooleanProperty(False)
+    label      = StringProperty("")
+    icon_type  = StringProperty("5g")
+    is_ok      = BooleanProperty(False)
+    is_warning = BooleanProperty(False)  # orange — connected but degraded
 
-    _GREEN = (0.000, 0.824, 0.549, 1.0)
-    _GREY  = (0.420, 0.420, 0.500, 1.0)
+    _GREEN  = (0.000, 0.824, 0.549, 1.0)
+    _ORANGE = (1.000, 0.502, 0.000, 1.0)
+    _RED    = (0.937, 0.137, 0.235, 1.0)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.orientation = "vertical"
-        self.bind(pos=self._redraw, size=self._redraw, is_ok=self._redraw)
+        self.bind(pos=self._redraw, size=self._redraw,
+                  is_ok=self._redraw, is_warning=self._redraw)
 
     # ── Redraw ────────────────────────────────────────────────────────────
 
     def _redraw(self, *_):
         self.canvas.before.clear()
-        fg = self._GREEN if self.is_ok else self._GREY
+        if self.is_ok:
+            fg = self._GREEN
+        elif self.is_warning:
+            fg = self._ORANGE
+        else:
+            fg = self._RED
         bg = (fg[0], fg[1], fg[2], 0.18 if self.is_ok else 0.12)
         # Icon centre: upper portion of the widget (above the 16dp label)
         cx = self.center_x

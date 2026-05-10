@@ -66,6 +66,32 @@
             # Spacer
             Widget:
 
+            # GPS fix status
+            BoxLayout:
+                orientation: 'vertical'
+                size_hint_x: None
+                width: '110dp'
+                padding: '0dp', '8dp'
+                spacing: '2dp'
+
+                Label:
+                    text: 'GPS'
+                    font_size: '10sp'
+                    color: 0.612, 0.639, 0.686, 1
+                    halign: 'right'
+                    valign: 'middle'
+                    text_size: self.size
+
+                Label:
+                    id: lbl_gps_status
+                    text: 'No Fix'
+                    font_size: '12sp'
+                    bold: True
+                    color: 0.937, 0.137, 0.235, 1
+                    halign: 'right'
+                    valign: 'middle'
+                    text_size: self.size
+
             # Connection status indicators
             ConnIndicator:
                 id: ind_5g

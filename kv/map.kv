@@ -1,5 +1,3 @@
-#:import MapView app.screens.map_screen.MapView
-
 <MapScreen>:
     BoxLayout:
         orientation: 'vertical'
@@ -18,14 +16,12 @@
                 Rectangle:
                     pos: self.pos
                     size: self.size
-                # Bottom divider
                 Color:
                     rgba: 0.0, 0.706, 0.847, 0.3
                 Line:
                     points: [self.x, self.y, self.right, self.y]
                     width: 1
 
-            # Screen title
             Label:
                 text: 'Map'
                 font_size: '24sp'
@@ -37,7 +33,6 @@
                 valign: 'middle'
                 text_size: self.size
 
-            # Coordinates sub-label
             Label:
                 text: '60.0137563 N  11.0196226 E'
                 font_size: '13sp'
@@ -46,10 +41,34 @@
                 valign: 'middle'
                 text_size: self.size
 
-            # Spacer
             Widget:
 
-            # Connection status indicators
+            # GPS fix status
+            BoxLayout:
+                orientation: 'vertical'
+                size_hint_x: None
+                width: '110dp'
+                padding: '0dp', '8dp'
+                spacing: '2dp'
+
+                Label:
+                    text: 'GPS'
+                    font_size: '10sp'
+                    color: 0.612, 0.639, 0.686, 1
+                    halign: 'right'
+                    valign: 'middle'
+                    text_size: self.size
+
+                Label:
+                    id: lbl_gps_status
+                    text: 'No Fix'
+                    font_size: '12sp'
+                    bold: True
+                    color: 0.937, 0.137, 0.235, 1
+                    halign: 'right'
+                    valign: 'middle'
+                    text_size: self.size
+
             ConnIndicator:
                 id: ind_5g
                 label: '5G'
@@ -65,7 +84,6 @@
                 label: 'IMU'
                 icon_type: 'imu'
 
-            # Clock + date
             BoxLayout:
                 orientation: 'vertical'
                 size_hint_x: None
@@ -92,83 +110,25 @@
 
             ExitButton:
 
-        # ── 3D Map render area ────────────────────────────────────────────
+        # ── Map placeholder – Chromium renders over this widget ───────────
         FloatLayout:
+            id: map_placeholder
             canvas.before:
                 Color:
-                    rgba: 0.055, 0.075, 0.145, 1
+                    rgba: 0.051, 0.075, 0.161, 1
                 Rectangle:
                     pos: self.pos
                     size: self.size
 
-            MapView:
-                id: map_view
-                size_hint: 1, 1
-                pos_hint: {'x': 0, 'y': 0}
-
-            # Compass rose (top-right corner)
-            BoxLayout:
-                orientation: 'vertical'
-                size_hint: None, None
-                size: '64dp', '64dp'
-                pos_hint: {'right': 0.99, 'top': 0.98}
-                canvas.before:
-                    Color:
-                        rgba: 0.086, 0.129, 0.243, 0.75
-                    RoundedRectangle:
-                        pos: self.pos
-                        size: self.size
-                        radius: [dp(8)]
-
-                Label:
-                    text: 'N'
-                    font_size: '20sp'
-                    bold: True
-                    color: 0.0, 0.706, 0.847, 1
-                    halign: 'center'
-                    valign: 'middle'
-                    text_size: self.size
-
-            # Coordinate overlay (bottom-left)
-            BoxLayout:
-                orientation: 'vertical'
-                size_hint: None, None
-                size: '220dp', '52dp'
-                pos_hint: {'x': 0.01, 'y': 0.01}
-                padding: '10dp', '6dp'
-                canvas.before:
-                    Color:
-                        rgba: 0.086, 0.129, 0.243, 0.8
-                    RoundedRectangle:
-                        pos: self.pos
-                        size: self.size
-                        radius: [dp(8)]
-
-                Label:
-                    text: '\u25c9  Boot position'
-                    font_size: '13sp'
-                    bold: True
-                    color: 0.0, 0.706, 0.847, 1
-                    halign: 'left'
-                    valign: 'middle'
-                    text_size: self.size
-
-                Label:
-                    text: '60.0137563 N  11.0196226 E'
-                    font_size: '11sp'
-                    color: 0.612, 0.639, 0.686, 1
-                    halign: 'left'
-                    valign: 'middle'
-                    text_size: self.size
-
-            # Hint: drag / pinch
             Label:
-                text: 'Drag to pan  \u2022  Pinch to zoom'
-                font_size: '11sp'
-                color: 0.612, 0.639, 0.686, 0.7
-                size_hint: None, None
-                size: '220dp', '24dp'
-                pos_hint: {'center_x': 0.5, 'y': 0.01}
+                id: map_no_browser
+                opacity: 0
+                text: 'Chromium browser not found.\nInstall chromium or chromium-browser to view the 3D map.'
+                font_size: '15sp'
+                color: 0.612, 0.639, 0.686, 1
                 halign: 'center'
                 valign: 'middle'
-                text_size: self.size
+                text_size: self.width, None
+                pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+                size_hint: 0.8, None
+                height: self.texture_size[1]

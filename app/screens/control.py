@@ -24,6 +24,8 @@ class ControlScreen(Screen):
             sensor_light_on=self._sync_toggles,
             cellular_ok=self._on_connections,
             gps_ok=self._on_connections,
+            gps_float_rtk=self._on_connections,
+            gps_status_text=self._on_connections,
             imu_ok=self._on_connections,
         )
         self._on_connections()
@@ -41,6 +43,8 @@ class ControlScreen(Screen):
             sensor_light_on=self._sync_toggles,
             cellular_ok=self._on_connections,
             gps_ok=self._on_connections,
+            gps_float_rtk=self._on_connections,
+            gps_status_text=self._on_connections,
             imu_ok=self._on_connections,
         )
 
@@ -53,9 +57,18 @@ class ControlScreen(Screen):
 
     def _on_connections(self, *_):
         ds = DataService.get()
-        self.ids.ind_5g.is_ok  = ds.cellular_ok
-        self.ids.ind_gps.is_ok = ds.gps_ok
-        self.ids.ind_imu.is_ok = ds.imu_ok
+        self.ids.ind_5g.is_ok       = ds.cellular_ok
+        self.ids.ind_gps.is_ok      = ds.gps_ok
+        self.ids.ind_gps.is_warning = ds.gps_float_rtk
+        self.ids.ind_imu.is_ok      = ds.imu_ok
+        lbl = self.ids.lbl_gps_status
+        lbl.text = ds.gps_status_text
+        if ds.gps_ok:
+            lbl.color = (0.000, 0.824, 0.549, 1.0)
+        elif ds.gps_float_rtk:
+            lbl.color = (1.000, 0.502, 0.000, 1.0)
+        else:
+            lbl.color = (0.937, 0.137, 0.235, 1.0)
 
     def _sync_toggles(self, *_args):
         ds = DataService.get()

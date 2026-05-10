@@ -9,7 +9,7 @@
         text: root.label
         font_size: '10sp'
         bold: True
-        color: (0.0, 0.824, 0.549, 1.0) if root.is_ok else (0.42, 0.42, 0.50, 1.0)
+        color: (0.0, 0.824, 0.549, 1.0) if root.is_ok else ((1.0, 0.502, 0.0, 1.0) if root.is_warning else (0.937, 0.137, 0.235, 1.0))
         halign: 'center'
         valign: 'middle'
         text_size: self.size

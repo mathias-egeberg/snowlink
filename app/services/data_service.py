@@ -36,9 +36,11 @@ class DataService(EventDispatcher):
     sensor_light_on    = BooleanProperty(True)
 
     # ── Connection / peripheral status ───────────────────────────────────
-    cellular_ok = BooleanProperty(False)
-    gps_ok      = BooleanProperty(False)
-    imu_ok      = BooleanProperty(False)
+    cellular_ok      = BooleanProperty(False)
+    gps_ok           = BooleanProperty(False)   # True = RTK Fixed
+    gps_float_rtk    = BooleanProperty(False)   # True = any fix but not RTK Fixed (orange)
+    gps_status_text  = StringProperty("No Fix")
+    imu_ok           = BooleanProperty(False)
 
     _instance = None
 
@@ -60,6 +62,12 @@ class DataService(EventDispatcher):
         # Simulate live sensor fluctuation every 5 seconds.
         # Replace with real hardware polling on the Pi.
         Clock.schedule_interval(self._fluctuate, 5)
+        # USB IMU detection — runs in background, updates self.imu_ok.
+        from app.services.imu_service import ImuService
+        self._imu_service = ImuService(self)
+        # USB GPS — reads NMEA from ZED-F9P, updates gps_ok / gps_float_rtk / gps_status_text.
+        from app.services.gps_service import GpsService
+        self._gps_service = GpsService(self)
 
     # ── Internal helpers ──────────────────────────────────────────────────
 

@@ -31,23 +31,6 @@
                 valign: 'middle'
                 text_size: self.size
 
-            # Connection status indicators
-            ConnIndicator:
-                id: ind_5g
-                label: '5G'
-                icon_type: '5g'
-
-            ConnIndicator:
-                id: ind_gps
-                label: 'GPS'
-                icon_type: 'gps'
-
-            ConnIndicator:
-                id: ind_imu
-                label: 'IMU'
-                icon_type: 'imu'
-
-            # Clock + date
             BoxLayout:
                 orientation: 'vertical'
                 size_hint_x: None
@@ -74,24 +57,35 @@
 
             ExitButton:
 
-        # ── Scrollable settings list ──────────────────────────────────────
+        # ── Scrollable content ────────────────────────────────────────────
         ScrollView:
             do_scroll_x: False
 
             BoxLayout:
                 orientation: 'vertical'
                 padding: '24dp', '20dp'
-                spacing: '14dp'
+                spacing: '16dp'
                 size_hint_y: None
                 height: self.minimum_height
 
-                # ── Activation Threshold ──────────────────────────────────
-                BoxLayout:
-                    orientation: 'horizontal'
+                # ── NTRIP Caster ──────────────────────────────────────────
+                Label:
+                    text: 'NTRIP CASTER'
+                    font_size: '11sp'
+                    bold: True
+                    color: 0.612, 0.639, 0.686, 1
+                    halign: 'left'
+                    valign: 'middle'
                     size_hint_y: None
-                    height: '80dp'
-                    padding: '20dp', '14dp'
-                    spacing: '12dp'
+                    height: '20dp'
+                    text_size: self.size
+
+                BoxLayout:
+                    orientation: 'vertical'
+                    size_hint_y: None
+                    height: self.minimum_height
+                    padding: '20dp', '18dp'
+                    spacing: '14dp'
                     canvas.before:
                         Color:
                             rgba: 0.086, 0.129, 0.243, 1
@@ -100,171 +94,262 @@
                             size: self.size
                             radius: [dp(12), dp(12), dp(12), dp(12)]
 
-                    BoxLayout:
-                        orientation: 'vertical'
-                        spacing: '2dp'
-
-                        Label:
-                            text: 'Activation Threshold'
-                            font_size: '17sp'
-                            bold: True
-                            color: 0.910, 0.910, 0.910, 1
-                            halign: 'left'
-                            text_size: self.size
-
-                        Label:
-                            text: 'Temperature to start heating'
-                            font_size: '13sp'
-                            color: 0.612, 0.639, 0.686, 1
-                            halign: 'left'
-                            text_size: self.size
-
-                    # Stepper control
+                    # Enable row
                     BoxLayout:
                         orientation: 'horizontal'
-                        size_hint_x: None
-                        width: '220dp'
-                        spacing: '8dp'
+                        size_hint_y: None
+                        height: '52dp'
+                        spacing: '12dp'
+
+                        BoxLayout:
+                            orientation: 'vertical'
+                            spacing: '2dp'
+
+                            Label:
+                                text: 'Correction Data'
+                                font_size: '17sp'
+                                bold: True
+                                color: 0.910, 0.910, 0.910, 1
+                                halign: 'left'
+                                valign: 'bottom'
+                                text_size: self.size
+
+                            Label:
+                                text: 'RTK corrections via NTRIP protocol'
+                                font_size: '12sp'
+                                color: 0.612, 0.639, 0.686, 1
+                                halign: 'left'
+                                valign: 'top'
+                                text_size: self.size
 
                         Button:
-                            text: '-'
                             size_hint_x: None
-                            width: '52dp'
-                            font_size: '22sp'
+                            width: '120dp'
+                            text: 'Enabled' if root.ntrip_enabled else 'Disabled'
+                            font_size: '15sp'
                             bold: True
                             background_color: 0, 0, 0, 0
                             color: 0.910, 0.910, 0.910, 1
                             canvas.before:
                                 Color:
-                                    rgba: 0.0, 0.706, 0.847, 0.25
+                                    rgba: (0.024, 0.839, 0.627, 1) if root.ntrip_enabled else (0.937, 0.137, 0.235, 1)
                                 RoundedRectangle:
                                     pos: self.pos
                                     size: self.size
                                     radius: [dp(8), dp(8), dp(8), dp(8)]
-                            on_release: root.decrement_threshold()
+                            on_release: root.toggle_ntrip()
 
-                        Label:
-                            text: ('+' if root.activation_threshold >= 0 else '') + '{:.1f} C'.format(root.activation_threshold)
-                            font_size: '18sp'
-                            bold: True
-                            color: 0.0, 0.706, 0.847, 1
-                            halign: 'center'
-                            valign: 'middle'
-                            text_size: self.size
-
-                        Button:
-                            text: '+'
-                            size_hint_x: None
-                            width: '52dp'
-                            font_size: '22sp'
-                            bold: True
-                            background_color: 0, 0, 0, 0
-                            color: 0.910, 0.910, 0.910, 1
-                            canvas.before:
-                                Color:
-                                    rgba: 0.0, 0.706, 0.847, 0.25
-                                RoundedRectangle:
-                                    pos: self.pos
-                                    size: self.size
-                                    radius: [dp(8), dp(8), dp(8), dp(8)]
-                            on_release: root.increment_threshold()
-
-                # ── System Mode ───────────────────────────────────────────
-                BoxLayout:
-                    orientation: 'horizontal'
-                    size_hint_y: None
-                    height: '80dp'
-                    padding: '20dp', '14dp'
-                    spacing: '12dp'
-                    canvas.before:
-                        Color:
-                            rgba: 0.086, 0.129, 0.243, 1
-                        RoundedRectangle:
-                            pos: self.pos
-                            size: self.size
-                            radius: [dp(12), dp(12), dp(12), dp(12)]
-
+                    # Divider
                     BoxLayout:
-                        orientation: 'vertical'
-                        spacing: '2dp'
-
-                        Label:
-                            text: 'System Mode'
-                            font_size: '17sp'
-                            bold: True
-                            color: 0.910, 0.910, 0.910, 1
-                            halign: 'left'
-                            text_size: self.size
-
-                        Label:
-                            text: 'Auto activates based on temperature'
-                            font_size: '13sp'
-                            color: 0.612, 0.639, 0.686, 1
-                            halign: 'left'
-                            text_size: self.size
-
-                    Button:
-                        size_hint_x: None
-                        width: '130dp'
-                        text: root.system_mode
-                        font_size: '16sp'
-                        bold: True
-                        background_color: 0, 0, 0, 0
-                        color: 0.910, 0.910, 0.910, 1
+                        size_hint_y: None
+                        height: '1dp'
                         canvas.before:
                             Color:
-                                rgba: (0.0, 0.706, 0.847, 1) if root.system_mode == 'Auto' else (1.0, 0.718, 0.012, 1)
-                            RoundedRectangle:
+                                rgba: 0.0, 0.706, 0.847, 0.2
+                            Rectangle:
                                 pos: self.pos
                                 size: self.size
-                                radius: [dp(10), dp(10), dp(10), dp(10)]
-                        on_release: root.toggle_mode()
 
-                # ── Display Brightness ────────────────────────────────────
-                BoxLayout:
-                    orientation: 'horizontal'
-                    size_hint_y: None
-                    height: '80dp'
-                    padding: '20dp', '14dp'
-                    spacing: '12dp'
-                    canvas.before:
-                        Color:
-                            rgba: 0.086, 0.129, 0.243, 1
-                        RoundedRectangle:
-                            pos: self.pos
-                            size: self.size
-                            radius: [dp(12), dp(12), dp(12), dp(12)]
-
+                    # Host
                     BoxLayout:
                         orientation: 'vertical'
-                        spacing: '2dp'
+                        size_hint_y: None
+                        height: '66dp'
+                        spacing: '4dp'
 
                         Label:
-                            text: 'Display Brightness'
-                            font_size: '17sp'
+                            text: 'Host'
+                            font_size: '11sp'
                             bold: True
-                            color: 0.910, 0.910, 0.910, 1
-                            halign: 'left'
-                            text_size: self.size
-
-                        Label:
-                            text: '{:.0f}%'.format(root.brightness * 100)
-                            font_size: '13sp'
                             color: 0.612, 0.639, 0.686, 1
                             halign: 'left'
+                            valign: 'middle'
+                            size_hint_y: None
+                            height: '16dp'
                             text_size: self.size
 
-                    Slider:
-                        size_hint_x: None
-                        width: '220dp'
-                        min: 0.1
-                        max: 1.0
-                        step: 0.05
-                        value: root.brightness
-                        cursor_size: dp(28), dp(28)
-                        on_value: root.brightness = self.value
+                        TextInput:
+                            id: inp_host
+                            hint_text: 'e.g. ntrip.example.com'
+                            multiline: False
+                            font_size: '16sp'
+                            background_normal: ''
+                            background_color: 0.059, 0.204, 0.376, 1
+                            foreground_color: 0.910, 0.910, 0.910, 1
+                            hint_text_color: 0.400, 0.420, 0.460, 1
+                            cursor_color: 0.0, 0.706, 0.847, 1
+                            padding: dp(12), dp(10)
+                            size_hint_y: None
+                            height: '46dp'
 
-                # ── App Version (read-only) ───────────────────────────────
+                    # Port
+                    BoxLayout:
+                        orientation: 'vertical'
+                        size_hint_y: None
+                        height: '66dp'
+                        spacing: '4dp'
+
+                        Label:
+                            text: 'Port'
+                            font_size: '11sp'
+                            bold: True
+                            color: 0.612, 0.639, 0.686, 1
+                            halign: 'left'
+                            valign: 'middle'
+                            size_hint_y: None
+                            height: '16dp'
+                            text_size: self.size
+
+                        TextInput:
+                            id: inp_port
+                            hint_text: '2101'
+                            multiline: False
+                            input_filter: 'int'
+                            font_size: '16sp'
+                            background_normal: ''
+                            background_color: 0.059, 0.204, 0.376, 1
+                            foreground_color: 0.910, 0.910, 0.910, 1
+                            hint_text_color: 0.400, 0.420, 0.460, 1
+                            cursor_color: 0.0, 0.706, 0.847, 1
+                            padding: dp(12), dp(10)
+                            size_hint_y: None
+                            height: '46dp'
+
+                    # Mountpoint
+                    BoxLayout:
+                        orientation: 'vertical'
+                        size_hint_y: None
+                        height: '66dp'
+                        spacing: '4dp'
+
+                        Label:
+                            text: 'Mountpoint'
+                            font_size: '11sp'
+                            bold: True
+                            color: 0.612, 0.639, 0.686, 1
+                            halign: 'left'
+                            valign: 'middle'
+                            size_hint_y: None
+                            height: '16dp'
+                            text_size: self.size
+
+                        TextInput:
+                            id: inp_mountpoint
+                            hint_text: 'e.g. RTCM3_MSM'
+                            multiline: False
+                            font_size: '16sp'
+                            background_normal: ''
+                            background_color: 0.059, 0.204, 0.376, 1
+                            foreground_color: 0.910, 0.910, 0.910, 1
+                            hint_text_color: 0.400, 0.420, 0.460, 1
+                            cursor_color: 0.0, 0.706, 0.847, 1
+                            padding: dp(12), dp(10)
+                            size_hint_y: None
+                            height: '46dp'
+
+                    # Username
+                    BoxLayout:
+                        orientation: 'vertical'
+                        size_hint_y: None
+                        height: '66dp'
+                        spacing: '4dp'
+
+                        Label:
+                            text: 'Username'
+                            font_size: '11sp'
+                            bold: True
+                            color: 0.612, 0.639, 0.686, 1
+                            halign: 'left'
+                            valign: 'middle'
+                            size_hint_y: None
+                            height: '16dp'
+                            text_size: self.size
+
+                        TextInput:
+                            id: inp_username
+                            hint_text: 'Username (optional)'
+                            multiline: False
+                            font_size: '16sp'
+                            background_normal: ''
+                            background_color: 0.059, 0.204, 0.376, 1
+                            foreground_color: 0.910, 0.910, 0.910, 1
+                            hint_text_color: 0.400, 0.420, 0.460, 1
+                            cursor_color: 0.0, 0.706, 0.847, 1
+                            padding: dp(12), dp(10)
+                            size_hint_y: None
+                            height: '46dp'
+
+                    # Password
+                    BoxLayout:
+                        orientation: 'vertical'
+                        size_hint_y: None
+                        height: '66dp'
+                        spacing: '4dp'
+
+                        Label:
+                            text: 'Password'
+                            font_size: '11sp'
+                            bold: True
+                            color: 0.612, 0.639, 0.686, 1
+                            halign: 'left'
+                            valign: 'middle'
+                            size_hint_y: None
+                            height: '16dp'
+                            text_size: self.size
+
+                        TextInput:
+                            id: inp_password
+                            hint_text: 'Password (optional)'
+                            multiline: False
+                            password: True
+                            font_size: '16sp'
+                            background_normal: ''
+                            background_color: 0.059, 0.204, 0.376, 1
+                            foreground_color: 0.910, 0.910, 0.910, 1
+                            hint_text_color: 0.400, 0.420, 0.460, 1
+                            cursor_color: 0.0, 0.706, 0.847, 1
+                            padding: dp(12), dp(10)
+                            size_hint_y: None
+                            height: '46dp'
+
+                    # Save button
+                    BoxLayout:
+                        orientation: 'horizontal'
+                        size_hint_y: None
+                        height: '48dp'
+
+                        Widget:
+
+                        Button:
+                            id: btn_save_ntrip
+                            text: 'Save'
+                            size_hint_x: None
+                            width: '140dp'
+                            font_size: '16sp'
+                            bold: True
+                            background_color: 0, 0, 0, 0
+                            color: 0.102, 0.102, 0.180, 1
+                            canvas.before:
+                                Color:
+                                    rgba: 0.0, 0.706, 0.847, 1
+                                RoundedRectangle:
+                                    pos: self.pos
+                                    size: self.size
+                                    radius: [dp(8), dp(8), dp(8), dp(8)]
+                            on_release: root.save_ntrip()
+
+                # ── Application Version ───────────────────────────────────
+                Label:
+                    text: 'APPLICATION'
+                    font_size: '11sp'
+                    bold: True
+                    color: 0.612, 0.639, 0.686, 1
+                    halign: 'left'
+                    valign: 'middle'
+                    size_hint_y: None
+                    height: '20dp'
+                    text_size: self.size
+
                 BoxLayout:
                     orientation: 'horizontal'
                     size_hint_y: None

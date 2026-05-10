@@ -226,3 +226,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# SnowLink runtime files
+settings.json
+cache/
+.python-version

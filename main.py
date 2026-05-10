@@ -59,6 +59,63 @@ _KV_FILES = [
 class RootWidget(BoxLayout):
     """Application root – holds the ScreenManager and the NavBar."""
 
+    def on_kv_post(self, base_widget):
+        from app.services.data_service import DataService
+        ds = DataService.get()
+        self._imu_was_ok = ds.imu_ok
+        ds.bind(imu_ok=self._on_imu_changed)
+
+    def _on_imu_changed(self, _, is_ok):
+        if not is_ok and self._imu_was_ok:
+            self._show_imu_popup()
+        self._imu_was_ok = is_ok
+
+    def _show_imu_popup(self):
+        from kivy.uix.popup import Popup
+        from kivy.uix.boxlayout import BoxLayout
+        from kivy.uix.label import Label
+        from kivy.uix.button import Button
+        from kivy.metrics import dp
+
+        content = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(16))
+
+        msg = Label(
+            text='The WheelTech N100 IMU has lost its\nUSB connection. Check the cable.',
+            font_size='15sp',
+            color=(0.910, 0.910, 0.910, 1),
+            halign='center',
+            valign='middle',
+        )
+        msg.bind(size=lambda s, v: setattr(s, 'text_size', v))
+
+        btn = Button(
+            text='Dismiss',
+            size_hint=(0.5, None),
+            pos_hint={'center_x': 0.5},
+            height=dp(44),
+            background_normal='',
+            background_color=(0.937, 0.137, 0.235, 1),
+            color=(1, 1, 1, 1),
+            font_size='15sp',
+            bold=True,
+        )
+
+        content.add_widget(msg)
+        content.add_widget(btn)
+
+        popup = Popup(
+            title='⚠  IMU Disconnected',
+            content=content,
+            size_hint=(None, None),
+            size=(dp(440), dp(240)),
+            background_color=(0.086, 0.129, 0.243, 0.97),
+            separator_color=(0.937, 0.137, 0.235, 0.5),
+            title_color=(0.937, 0.137, 0.235, 1),
+            title_size='17sp',
+        )
+        btn.bind(on_release=popup.dismiss)
+        popup.open()
+
 
 class SnowLinkApp(App):
     title = "SnowLink"
@@ -68,16 +125,6 @@ class SnowLinkApp(App):
             Builder.load_file(os.path.join(_KV_DIR, kv_file))
         return RootWidget()
 
-    def on_start(self):
-        # Launch the map webview subprocess as soon as the Kivy window exists
-        # so tiles preload while the user is on other screens. The first visit
-        # to MapScreen is then instant.
-        from app.screens.map_screen import get_map_host
-        get_map_host().ensure_started()
-
-    def on_stop(self):
-        from app.screens.map_screen import get_map_host
-        get_map_host().stop()
 
 
 if __name__ == "__main__":
