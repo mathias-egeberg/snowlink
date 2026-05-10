@@ -351,10 +351,10 @@
                     text_size: self.size
 
                 BoxLayout:
-                    orientation: 'horizontal'
+                    orientation: 'vertical'
                     size_hint_y: None
-                    height: '80dp'
-                    padding: '20dp', '14dp'
+                    height: '248dp'
+                    padding: '20dp', '16dp'
                     spacing: '12dp'
                     canvas.before:
                         Color:
@@ -365,40 +365,152 @@
                             radius: [dp(12), dp(12), dp(12), dp(12)]
 
                     BoxLayout:
-                        orientation: 'vertical'
-                        spacing: '2dp'
+                        orientation: 'horizontal'
+                        size_hint_y: None
+                        height: '48dp'
+                        spacing: '12dp'
 
-                        Label:
-                            text: 'Position Marker'
-                            font_size: '17sp'
+                        BoxLayout:
+                            orientation: 'vertical'
+                            spacing: '2dp'
+
+                            Label:
+                                text: 'Position Marker'
+                                font_size: '17sp'
+                                bold: True
+                                color: 0.910, 0.910, 0.910, 1
+                                halign: 'left'
+                                text_size: self.size
+
+                            Label:
+                                text: 'Style shown on the map'
+                                font_size: '13sp'
+                                color: 0.612, 0.639, 0.686, 1
+                                halign: 'left'
+                                text_size: self.size
+
+                        Button:
+                            size_hint_x: None
+                            width: '160dp'
+                            text: 'Snowcat Model' if root.marker_style == 'snowcat' else 'GPS Dot'
+                            font_size: '15sp'
                             bold: True
+                            background_color: 0, 0, 0, 0
                             color: 0.910, 0.910, 0.910, 1
-                            halign: 'left'
-                            text_size: self.size
+                            canvas.before:
+                                Color:
+                                    rgba: (0.0, 0.706, 0.847, 1) if root.marker_style == 'snowcat' else (1.0, 0.718, 0.012, 1)
+                                RoundedRectangle:
+                                    pos: self.pos
+                                    size: self.size
+                                    radius: [dp(10), dp(10), dp(10), dp(10)]
+                            on_release: root.toggle_marker_style()
 
-                        Label:
-                            text: 'Style shown on the map'
-                            font_size: '13sp'
-                            color: 0.612, 0.639, 0.686, 1
-                            halign: 'left'
-                            text_size: self.size
-
-                    Button:
-                        size_hint_x: None
-                        width: '160dp'
-                        text: 'Snowcat Model' if root.marker_style == 'snowcat' else 'GPS Dot'
-                        font_size: '15sp'
-                        bold: True
-                        background_color: 0, 0, 0, 0
-                        color: 0.910, 0.910, 0.910, 1
+                    BoxLayout:
+                        size_hint_y: None
+                        height: '1dp'
                         canvas.before:
                             Color:
-                                rgba: (0.0, 0.706, 0.847, 1) if root.marker_style == 'snowcat' else (1.0, 0.718, 0.012, 1)
-                            RoundedRectangle:
+                                rgba: 0.0, 0.706, 0.847, 0.2
+                            Rectangle:
                                 pos: self.pos
                                 size: self.size
-                                radius: [dp(10), dp(10), dp(10), dp(10)]
-                        on_release: root.toggle_marker_style()
+
+                    BoxLayout:
+                        orientation: 'horizontal'
+                        size_hint_y: None
+                        height: '52dp'
+                        spacing: '12dp'
+
+                        BoxLayout:
+                            orientation: 'vertical'
+                            spacing: '2dp'
+
+                            Label:
+                                text: 'IMU Heading Control'
+                                font_size: '17sp'
+                                bold: True
+                                color: 0.910, 0.910, 0.910, 1
+                                halign: 'left'
+                                text_size: self.size
+
+                            Label:
+                                text: 'Rotate the snowcat and map bearing from calibrated yaw'
+                                font_size: '13sp'
+                                color: 0.612, 0.639, 0.686, 1
+                                halign: 'left'
+                                text_size: self.size
+
+                        Button:
+                            size_hint_x: None
+                            width: '160dp'
+                            text: 'Enabled' if root.imu_heading_enabled else 'Disabled'
+                            font_size: '15sp'
+                            bold: True
+                            background_color: 0, 0, 0, 0
+                            color: 0.910, 0.910, 0.910, 1
+                            canvas.before:
+                                Color:
+                                    rgba: (0.024, 0.839, 0.627, 1) if root.imu_heading_enabled else (0.937, 0.137, 0.235, 1)
+                                RoundedRectangle:
+                                    pos: self.pos
+                                    size: self.size
+                                    radius: [dp(10), dp(10), dp(10), dp(10)]
+                            on_release: root.toggle_imu_heading_control()
+
+                    BoxLayout:
+                        size_hint_y: None
+                        height: '1dp'
+                        canvas.before:
+                            Color:
+                                rgba: 0.0, 0.706, 0.847, 0.2
+                            Rectangle:
+                                pos: self.pos
+                                size: self.size
+
+                    BoxLayout:
+                        orientation: 'horizontal'
+                        size_hint_y: None
+                        height: '60dp'
+                        spacing: '12dp'
+
+                        BoxLayout:
+                            orientation: 'vertical'
+                            spacing: '2dp'
+
+                            Label:
+                                text: 'Calibrate IMU'
+                                font_size: '17sp'
+                                bold: True
+                                color: 0.910, 0.910, 0.910, 1
+                                halign: 'left'
+                                text_size: self.size
+
+                            Label:
+                                text: root.imu_heading_status
+                                font_size: '13sp'
+                                color: 0.612, 0.639, 0.686, 1
+                                halign: 'left'
+                                text_size: self.size
+
+                        Button:
+                            id: btn_calibrate_imu
+                            size_hint_x: None
+                            width: '160dp'
+                            text: 'Calibrate'
+                            disabled: not root.can_calibrate_imu
+                            font_size: '15sp'
+                            bold: True
+                            background_color: 0, 0, 0, 0
+                            color: 0.910, 0.910, 0.910, 1
+                            canvas.before:
+                                Color:
+                                    rgba: (0.0, 0.706, 0.847, 1) if root.can_calibrate_imu else (0.239, 0.278, 0.341, 1)
+                                RoundedRectangle:
+                                    pos: self.pos
+                                    size: self.size
+                                    radius: [dp(10), dp(10), dp(10), dp(10)]
+                            on_release: root.calibrate_imu_heading()
 
                 # ── Application Version ───────────────────────────────────
                 Label:

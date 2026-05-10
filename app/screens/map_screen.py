@@ -18,6 +18,7 @@ import base64
 import datetime
 import os
 import threading
+import time
 from typing import Optional
 
 from kivy.clock import Clock
@@ -25,6 +26,8 @@ from kivy.core.window import Window
 from kivy.uix.screenmanager import Screen
 
 from app.services.data_service import DataService
+from app.services.imu_heading import shortest_yaw_delta
+from app.services.settings_service import SettingsService, VALID_MARKER_STYLES
 
 # ── Coordinates ───────────────────────────────────────────────────────────────
 BOOT_LAT = 60.0137563
@@ -129,7 +132,7 @@ var map = new maplibregl.Map({
   center: [bootLon, bootLat],
   zoom: 17,
   pitch: 55,
-  bearing: 0,
+  bearing: INITIAL_BEARING_PH,
   maxPitch: 85,
   touchZoomRotate: true,
   dragRotate: true,
@@ -180,7 +183,7 @@ map.addControl(
 // ── Shared state ──────────────────────────────────────────────────────────────
 window._modelLat     = bootLat;
 window._modelLon     = bootLon;
-window._modelBearing = 0;
+window._modelBearing = INITIAL_BEARING_PH;
 window._showSnowcat  = true;
 
 // ── Three.js custom 3D layer ──────────────────────────────────────────────────
@@ -335,7 +338,7 @@ window.moveMarker = function(lat, lon, bearing) {
   window._modelLon     = lon;
   window._modelBearing = bearing;
   if (window._dotMarker) window._dotMarker.setLngLat([lon, lat]);
-  map.easeTo({center: [lon, lat], duration: 200});
+  map.easeTo({center: [lon, lat], bearing: bearing, duration: 120});
   map.triggerRepaint();
 };
 
@@ -356,17 +359,30 @@ window.setBasemap = function(name) {
 """
 
 
-def _build_map_html(lat: float, lon: float, marker_style: str = "snowcat") -> str:
+def _build_map_html(
+    lat: float,
+    lon: float,
+    marker_style: str = "snowcat",
+    initial_bearing: float = 0.0,
+) -> str:
+    safe_marker_style = _normalize_marker_style(marker_style)
     return (
         _MAP_HTML
         .replace("BOOT_LAT_PH", f"{lat:.8f}")
         .replace("BOOT_LON_PH", f"{lon:.8f}")
+        .replace("INITIAL_BEARING_PH", f"{initial_bearing:.3f}")
         .replace("TOPO_PH",   _TOPO_TILES)
         .replace("AERIAL_PH", _AERIAL_TILES)
         .replace("DEM_PH",    _DEM_TILES)
         .replace("GLB_B64_PH", _SNOWCAT_GLB_B64)
-        .replace("INIT_MARKER_STYLE_PH", marker_style)
+        .replace("INIT_MARKER_STYLE_PH", safe_marker_style)
     )
+
+
+def _normalize_marker_style(style: str) -> str:
+    if style in VALID_MARKER_STYLES:
+        return style
+    return "snowcat"
 
 
 # ── webkit2gtk host ───────────────────────────────────────────────────────────
@@ -476,10 +492,27 @@ class _WebkitHost:
         """Inject JS to switch between 3D model ('snowcat') and GPS dot ('dot')."""
         if self._webview is None:
             return
+        safe_style = _normalize_marker_style(style)
         try:
             from gi.repository import GLib
             wv = self._webview
-            script = f"if(window.setMarkerStyle){{setMarkerStyle('{style}');}}"
+            script = f"if(window.setMarkerStyle){{setMarkerStyle('{safe_style}');}}"
+            GLib.idle_add(lambda: wv.run_javascript(script, None, None, None) or False)
+        except ImportError:
+            pass
+
+    def move_marker(self, lat: float, lon: float, bearing: float) -> None:
+        """Inject JS to move/rotate the map marker and viewpoint."""
+        if self._webview is None:
+            return
+        try:
+            from gi.repository import GLib
+            wv = self._webview
+            script = (
+                "if(window.moveMarker){"
+                f"moveMarker({lat:.8f},{lon:.8f},{bearing:.3f});"
+                "}"
+            )
             GLib.idle_add(lambda: wv.run_javascript(script, None, None, None) or False)
         except ImportError:
             pass
@@ -489,10 +522,15 @@ class _WebkitHost:
 
 class MapScreen(Screen):
     _webkit: _WebkitHost
+    # Limit WebKit JavaScript bridge traffic while still tracking operator heading.
+    _HEADING_UPDATE_MIN_INTERVAL = 0.1
+    _HEADING_UPDATE_MIN_DELTA = 0.5
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._webkit = _WebkitHost()
+        self._last_heading_sent: Optional[float] = None
+        self._last_heading_update = 0.0
 
     def on_enter(self):
         Clock.schedule_once(self._init, 0.05)
@@ -506,6 +544,9 @@ class MapScreen(Screen):
             gps_float_rtk=self._on_connections,
             gps_status_text=self._on_connections,
             imu_ok=self._on_connections,
+            imu_yaw_valid=self._on_imu_heading,
+            imu_heading_deg=self._on_imu_heading,
+            imu_heading_calibrated=self._on_imu_heading,
         )
         self._clock = Clock.schedule_interval(self._tick_clock, 1)
         self._tick_clock(0)
@@ -517,14 +558,19 @@ class MapScreen(Screen):
         win_x, win_y_bot = ph.to_window(0, 0)
 
         win_left = int(getattr(Window, "left", 0))
-        win_top  = int(getattr(Window, "top",  0))
+        win_top = int(getattr(Window, "top", 0))
         screen_x = win_left + int(win_x)
-        screen_y = win_top  + int(Window.height - win_y_bot - ph.height)
+        screen_y = win_top + int(Window.height - win_y_bot - ph.height)
 
-        from app.services.settings_service import SettingsService
         marker_style = SettingsService.load()['map']['marker_style']
+        initial_bearing = self._current_map_bearing(DataService.get())
 
-        html = _build_map_html(BOOT_LAT, BOOT_LON, marker_style)
+        html = _build_map_html(
+            BOOT_LAT,
+            BOOT_LON,
+            marker_style,
+            initial_bearing,
+        )
         ok = self._webkit.show(
             html,
             screen_x, screen_y,
@@ -534,6 +580,7 @@ class MapScreen(Screen):
             self.ids.map_no_browser.opacity = 1
         else:
             self._webkit.set_marker_style(marker_style)
+            self._apply_imu_heading(force=True)
 
     def on_leave(self):
         ds = DataService.get()
@@ -543,6 +590,9 @@ class MapScreen(Screen):
             gps_float_rtk=self._on_connections,
             gps_status_text=self._on_connections,
             imu_ok=self._on_connections,
+            imu_yaw_valid=self._on_imu_heading,
+            imu_heading_deg=self._on_imu_heading,
+            imu_heading_calibrated=self._on_imu_heading,
         )
         if hasattr(self, "_clock"):
             self._clock.cancel()
@@ -552,10 +602,10 @@ class MapScreen(Screen):
 
     def _on_connections(self, *_):
         ds = DataService.get()
-        self.ids.ind_5g.is_ok       = ds.cellular_ok
-        self.ids.ind_gps.is_ok      = ds.gps_ok
+        self.ids.ind_5g.is_ok = ds.cellular_ok
+        self.ids.ind_gps.is_ok = ds.gps_ok
         self.ids.ind_gps.is_warning = ds.gps_float_rtk
-        self.ids.ind_imu.is_ok      = ds.imu_ok
+        self.ids.ind_imu.is_ok = ds.imu_ok
         lbl = self.ids.lbl_gps_status
         lbl.text = ds.gps_status_text
         if ds.gps_ok:
@@ -564,6 +614,47 @@ class MapScreen(Screen):
             lbl.color = (1.000, 0.502, 0.000, 1.0)
         else:
             lbl.color = (0.937, 0.137, 0.235, 1.0)
+
+    def _on_imu_heading(self, *_):
+        self._apply_imu_heading()
+
+    def _apply_imu_heading(self, force: bool = False):
+        ds = DataService.get()
+        if not self._is_imu_heading_active(ds):
+            if force:
+                self._webkit.move_marker(BOOT_LAT, BOOT_LON, 0.0)
+                self._last_heading_sent = 0.0
+            return
+
+        bearing = ds.imu_heading_deg
+        now = time.monotonic()
+        if not force and now - self._last_heading_update < self._HEADING_UPDATE_MIN_INTERVAL:
+            return
+        if (
+            not force
+            and self._last_heading_sent is not None
+            and shortest_yaw_delta(bearing, self._last_heading_sent)
+            < self._HEADING_UPDATE_MIN_DELTA
+        ):
+            return
+
+        self._webkit.move_marker(BOOT_LAT, BOOT_LON, bearing)
+        self._last_heading_sent = bearing
+        self._last_heading_update = now
+
+    def _current_map_bearing(self, ds: DataService) -> float:
+        if not self._is_imu_heading_active(ds):
+            return 0.0
+        return ds.imu_heading_deg
+
+    def _is_imu_heading_active(self, ds: DataService) -> bool:
+        map_settings = SettingsService.load()['map']
+        return (
+            map_settings.get('imu_heading_enabled', False)
+            and ds.imu_ok
+            and ds.imu_yaw_valid
+            and ds.imu_heading_calibrated
+        )
 
     def _tick_clock(self, _dt):
         now = datetime.datetime.now()

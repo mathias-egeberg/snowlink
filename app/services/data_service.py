@@ -5,12 +5,16 @@ On a real Raspberry Pi, replace the _fluctuate() method and the toggle
 handlers with actual GPIO / sensor I/O calls (e.g., RPi.GPIO, smbus2).
 """
 import random
+from typing import Optional
 
 from kivy.clock import Clock
 from kivy.event import EventDispatcher
 from kivy.properties import (
     BooleanProperty, NumericProperty, StringProperty
 )
+
+from app.services.imu_heading import apply_yaw_calibration, normalize_yaw
+from app.services.settings_service import SettingsService
 
 
 class DataService(EventDispatcher):
@@ -41,6 +45,10 @@ class DataService(EventDispatcher):
     gps_float_rtk    = BooleanProperty(False)   # True = any fix but not RTK Fixed (orange)
     gps_status_text  = StringProperty("No Fix")
     imu_ok           = BooleanProperty(False)
+    imu_yaw_deg      = NumericProperty(0.0)
+    imu_yaw_valid    = BooleanProperty(False)
+    imu_heading_deg  = NumericProperty(0.0)
+    imu_heading_calibrated = BooleanProperty(False)
 
     _instance = None
 
@@ -59,6 +67,7 @@ class DataService(EventDispatcher):
             sensor_light_on=self._update_derived,
         )
         self._update_derived()
+        self.refresh_imu_heading_calibration()
         # Simulate live sensor fluctuation every 5 seconds.
         # Replace with real hardware polling on the Pi.
         Clock.schedule_interval(self._fluctuate, 5)
@@ -120,3 +129,46 @@ class DataService(EventDispatcher):
         setattr(self, device_key, not current)
         state = "ON" if not current else "OFF"
         self.last_event = f"{labels.get(device_key, device_key)} turned {state}"
+
+    def set_imu_yaw(self, yaw_deg: float) -> None:
+        """Update raw IMU yaw and derived calibrated heading."""
+        self.imu_yaw_deg = normalize_yaw(yaw_deg)
+        self.imu_yaw_valid = True
+        self._update_imu_heading()
+
+    def clear_imu_yaw(self) -> None:
+        """Mark IMU yaw as unavailable without clearing saved calibration."""
+        self.imu_yaw_valid = False
+
+    def refresh_imu_heading_calibration(self) -> None:
+        """Reload persisted IMU calibration state and recalculate heading."""
+        self._update_imu_heading()
+
+    def calibrate_imu_heading_to_boot(self) -> bool:
+        """Use the current IMU yaw as the boot/map-forward direction."""
+        if not self.imu_yaw_valid:
+            return False
+
+        settings = SettingsService.load()
+        settings['map']['imu_yaw_zero_deg'] = round(self.imu_yaw_deg, 4)
+        SettingsService.save()
+        self._update_imu_heading()
+        self.last_event = "IMU heading calibrated"
+        return True
+
+    def _get_imu_yaw_zero(self) -> Optional[float]:
+        zero = SettingsService.load()['map'].get('imu_yaw_zero_deg')
+        if zero is None:
+            return None
+        try:
+            return normalize_yaw(float(zero))
+        except (TypeError, ValueError):
+            return None
+
+    def _update_imu_heading(self) -> None:
+        zero = self._get_imu_yaw_zero()
+        self.imu_heading_calibrated = zero is not None
+        if zero is None:
+            self.imu_heading_deg = normalize_yaw(self.imu_yaw_deg)
+            return
+        self.imu_heading_deg = apply_yaw_calibration(self.imu_yaw_deg, zero)
