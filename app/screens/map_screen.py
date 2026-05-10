@@ -13,7 +13,9 @@ Lifecycle:
 """
 from __future__ import annotations
 
+import base64
 import datetime
+import os
 import threading
 from typing import Optional
 
@@ -39,6 +41,19 @@ _AERIAL_TILES = (
 _DEM_TILES = (
     "https://elevation-tiles-prod.s3.amazonaws.com/terrarium/{z}/{x}/{y}.png"
 )
+
+# ── Snowcat marker image ──────────────────────────────────────────────────────
+def _load_marker_data_url() -> str:
+    path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "assets", "snowcat_marker.png")
+    )
+    try:
+        with open(path, "rb") as f:
+            return "data:image/png;base64," + base64.b64encode(f.read()).decode()
+    except OSError:
+        return ""
+
+_SNOWCAT_DATA_URL = _load_marker_data_url()
 
 # ── MapLibre GL JS HTML ───────────────────────────────────────────────────────
 _MAP_HTML = """\
@@ -135,20 +150,36 @@ map.addControl(
 
 map.on('load', function() {
   var el = document.createElement('div');
-  el.style.cssText = [
-    'width:18px','height:18px','border-radius:50%',
-    'background:#00b4d8','border:3px solid #fff',
-    'box-shadow:0 0 12px rgba(0,180,216,0.9)'
+  el.style.cssText = 'position:relative;width:110px';
+
+  var img = document.createElement('img');
+  img.src = 'SNOWCAT_DATA_URL_PH';
+  img.style.cssText = [
+    'width:110px','display:block',
+    'filter:drop-shadow(0 3px 10px rgba(0,0,0,0.85))'
   ].join(';');
-  new maplibregl.Marker({element: el})
+  el.appendChild(img);
+
+  // Small GPS dot below the centre of the machine
+  var dot = document.createElement('div');
+  dot.style.cssText = [
+    'position:absolute','bottom:-6px','left:50%',
+    'transform:translateX(-50%)',
+    'width:10px','height:10px','border-radius:50%',
+    'background:#00b4d8','border:2px solid #fff',
+    'box-shadow:0 0 8px rgba(0,180,216,0.9)'
+  ].join(';');
+  el.appendChild(dot);
+
+  window._snowcatMarker = new maplibregl.Marker({element: el, anchor: 'bottom'})
     .setLngLat([bootLon, bootLat])
     .setPopup(
       new maplibregl.Popup({offset: 14})
         .setHTML(
           '<div style="font-family:sans-serif;font-size:12px;line-height:1.8">' +
-          '<strong>Boot position</strong><br/>' +
-          bootLat.toFixed(7) + ' N<br/>' +
-          bootLon.toFixed(7) + ' E</div>'
+          '<strong>Snowcat position</strong><br/>' +
+          bootLat.toFixed(7) + '° N<br/>' +
+          bootLon.toFixed(7) + '° E</div>'
         )
     )
     .addTo(map);
@@ -166,7 +197,10 @@ function setBasemap(name) {
 }
 
 window.moveMarker = function(lat, lon, bearing) {
-  map.easeTo({center:[lon,lat], bearing:bearing, duration:200});
+  if (window._snowcatMarker) {
+    window._snowcatMarker.setLngLat([lon, lat]);
+  }
+  map.easeTo({center:[lon, lat], bearing:bearing, duration:200});
 };
 </script>
 </body>
@@ -182,6 +216,7 @@ def _build_map_html(lat: float, lon: float) -> str:
         .replace("TOPO_PH",   _TOPO_TILES)
         .replace("AERIAL_PH", _AERIAL_TILES)
         .replace("DEM_PH",    _DEM_TILES)
+        .replace("SNOWCAT_DATA_URL_PH", _SNOWCAT_DATA_URL)
     )
 
 
