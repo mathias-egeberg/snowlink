@@ -47,6 +47,20 @@ echo ">>> Installing Python dependencies..."
 pip install --upgrade pip
 pip install -r requirements-pi.txt
 
+echo ">>> Converting 3D model to GLB (one-time, ~10 seconds)..."
+python - <<'PYEOF'
+import os, trimesh
+src = "assets/Yellow Snowcat Full Dismantled (1).3mf"
+dst = "assets/snowcat.glb"
+if not os.path.exists(dst):
+    scene = trimesh.load(src)
+    with open(dst, "wb") as f:
+        f.write(scene.export(file_type="glb"))
+    print(f"  Created {dst}")
+else:
+    print(f"  {dst} already exists, skipping")
+PYEOF
+
 # ── Shared .desktop content ──────────────────────────────────────────────────
 SNOWLINK_DIR="$(pwd)"
 DESKTOP_CONTENT="[Desktop Entry]

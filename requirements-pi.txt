@@ -7,3 +7,4 @@ httpx>=0.24.0
 mapview>=1.0.6
 requests>=2.28.0
 pyserial>=3.5
+trimesh[easy]>=4.0.0

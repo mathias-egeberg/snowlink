@@ -1,11 +1,12 @@
 """
-MapScreen – 3D interactive map using MapLibre GL JS.
+MapScreen – 3D interactive map using MapLibre GL JS + Three.js.
 
 The map is rendered by a webkit2gtk WebView running in a GLib event loop
 on a daemon thread.  The GTK window is frameless (override_redirect=True)
 and positioned exactly over the Kivy placeholder, making it appear fully
 embedded.  MapLibre GL JS delivers 3D terrain + full pan/tilt/zoom/rotate
-via WebGL and multi-touch.
+via WebGL.  The snowcat is rendered as a real 3D GLB model via a Three.js
+custom layer sharing MapLibre's WebGL context.
 
 Lifecycle:
   on_enter → _WebkitHost.start()  – frameless GTK window created, WebView loaded
@@ -42,20 +43,25 @@ _DEM_TILES = (
     "https://elevation-tiles-prod.s3.amazonaws.com/terrarium/{z}/{x}/{y}.png"
 )
 
-# ── Snowcat marker image ──────────────────────────────────────────────────────
-def _load_marker_data_url() -> str:
+# Base URL for the WebView – gives file:// access to project assets
+_BASE_URL = "file://" + os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..")
+) + "/"
+
+# GLB model embedded as base64 so the WebView needs no file:// fetch
+def _load_glb_b64() -> str:
     path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "assets", "snowcat_marker.png")
+        os.path.join(os.path.dirname(__file__), "..", "..", "assets", "snowcat.glb")
     )
     try:
         with open(path, "rb") as f:
-            return "data:image/png;base64," + base64.b64encode(f.read()).decode()
+            return base64.b64encode(f.read()).decode()
     except OSError:
         return ""
 
-_SNOWCAT_DATA_URL = _load_marker_data_url()
+_SNOWCAT_GLB_B64 = _load_glb_b64()
 
-# ── MapLibre GL JS HTML ───────────────────────────────────────────────────────
+# ── MapLibre + Three.js HTML ──────────────────────────────────────────────────
 _MAP_HTML = """\
 <!DOCTYPE html>
 <html lang="en">
@@ -83,6 +89,7 @@ html,body,#map{width:100%;height:100%;margin:0;padding:0;overflow:hidden;
 }
 .maplibregl-ctrl-logo{display:none!important}
 .maplibregl-ctrl-attrib{font-size:9px;opacity:0.6}
+.maplibregl-marker{opacity:1!important}
 </style>
 </head>
 <body>
@@ -91,20 +98,42 @@ html,body,#map{width:100%;height:100%;margin:0;padding:0;overflow:hidden;
   <button id="btn-topo"   class="active" onclick="setBasemap('topo')">Topo</button>
   <button id="btn-aerial"              onclick="setBasemap('aerial')">Aerial</button>
 </div>
+
+<!-- MapLibre (sets global maplibregl before module script runs) -->
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-<script>
+
+<!-- GLB model embedded as base64 – avoids any file:// fetch restrictions -->
+<script>window._glbB64='GLB_B64_PH';</script>
+
+<!-- Three.js ES module imports -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+// ── Coordinates (replaced by Python) ─────────────────────────────────────────
 var bootLat = BOOT_LAT_PH;
 var bootLon = BOOT_LON_PH;
 
+// ── Map ───────────────────────────────────────────────────────────────────────
 var map = new maplibregl.Map({
   container: 'map',
   center: [bootLon, bootLat],
-  zoom: 15,
+  zoom: 17,
   pitch: 55,
   bearing: 0,
   maxPitch: 85,
   touchZoomRotate: true,
   dragRotate: true,
+  canvasContextAttributes: {antialias: true},
   style: {
     version: 8,
     sources: {
@@ -148,81 +177,179 @@ map.addControl(
   'bottom-right'
 );
 
-map.on('load', function() {
-  var popup = new maplibregl.Popup({offset: 14})
-    .setHTML(
-      '<div style="font-family:sans-serif;font-size:12px;line-height:1.8">' +
-      '<strong>Snowcat position</strong><br/>' +
-      bootLat.toFixed(7) + '° N<br/>' +
-      bootLon.toFixed(7) + '° E</div>'
+// ── Shared state ──────────────────────────────────────────────────────────────
+window._modelLat     = bootLat;
+window._modelLon     = bootLon;
+window._modelBearing = 0;
+window._showSnowcat  = true;
+
+// ── Three.js custom 3D layer ──────────────────────────────────────────────────
+// Model extents (from trimesh): ~375mm × 214mm × 162mm native units.
+// Real snowcat ≈ 8 m long → world scale factor = 8000/375 ≈ 21.3
+var MODEL_SCALE_FACTOR = 21.3;
+
+function _mercatorTransform(lat, lon, bearingDeg) {
+  var coord = maplibregl.MercatorCoordinate.fromLngLat([lon, lat], 0);
+  var mpu   = coord.meterInMercatorCoordinateUnits(); // metres → Mercator units
+  return {
+    tx: coord.x, ty: coord.y, tz: coord.z,
+    // model in mm; /1000 converts mm→m; *mpu converts m→Mercator; *factor = world size
+    scale: (mpu / 1000) * MODEL_SCALE_FACTOR,
+    bearing: bearingDeg
+  };
+}
+
+var snowcatLayer = {
+  id: 'snowcat-3d',
+  type: 'custom',
+  renderingMode: '3d',
+
+  onAdd: function(map, gl) {
+    this._map = map;
+    this.camera = new THREE.Camera();
+    this.scene  = new THREE.Scene();
+
+    // Lighting – ambient + two directional lights for a convincing look
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+    var sun = new THREE.DirectionalLight(0xffffff, 1.4);
+    sun.position.set(1, -1, 2).normalize();
+    this.scene.add(sun);
+    var fill = new THREE.DirectionalLight(0xffffff, 0.5);
+    fill.position.set(-1, 1, 0.5).normalize();
+    this.scene.add(fill);
+
+    // Decode the embedded base64 GLB and parse it directly –
+    // avoids any file:// fetch restrictions in WebKit2.
+    var self = this;
+    var loader = new GLTFLoader();
+    fetch('data:model/gltf-binary;base64,' + window._glbB64)
+      .then(function(r) { return r.arrayBuffer(); })
+      .then(function(buf) {
+        loader.parse(buf, '',
+          function(gltf) {
+            // Activate vertex colours on every mesh – trimesh exports them as
+            // COLOR_0 attributes but GLTFLoader won't enable them automatically
+            // unless we tell the material.
+            gltf.scene.traverse(function(child) {
+              if (child.isMesh && child.geometry.attributes.color) {
+                if (Array.isArray(child.material)) {
+                  child.material.forEach(function(m) {
+                    m.vertexColors = true; m.needsUpdate = true;
+                  });
+                } else {
+                  child.material.vertexColors = true;
+                  child.material.needsUpdate = true;
+                }
+              }
+            });
+            self.scene.add(gltf.scene);
+            map.triggerRepaint();
+          },
+          function(err) { console.error('[snowcat-3d] parse error:', err); }
+        );
+      })
+      .catch(function(err) { console.error('[snowcat-3d] fetch error:', err); });
+
+    // Share MapLibre's canvas + WebGL context with Three.js
+    this.renderer = new THREE.WebGLRenderer({
+      canvas: map.getCanvas(),
+      context: gl,
+      antialias: true
+    });
+    this.renderer.autoClear = false;
+  },
+
+  render: function(gl, args) {
+    if (!window._showSnowcat) return;
+
+    var t = _mercatorTransform(
+      window._modelLat, window._modelLon, window._modelBearing
     );
 
-  // ── Snowcat model marker ──────────────────────────────────────────────
-  var snowcatEl = document.createElement('div');
-  var img = document.createElement('img');
-  img.src = 'SNOWCAT_DATA_URL_PH';
-  img.style.cssText = 'width:120px;display:block';
-  snowcatEl.appendChild(img);
+    // rotateX: PI/2 (GLTF Y-up → Mercator Z-up) + PI/2 (tilt forward) + PI (flip) = 2PI = 0
+    var rotX = new THREE.Matrix4().makeRotationAxis(
+      new THREE.Vector3(1, 0, 0), 0
+    );
+    // Fixed 90° right yaw offset so the model faces its natural forward direction
+    var rotZ_init = new THREE.Matrix4().makeRotationAxis(
+      new THREE.Vector3(0, 0, 1), -Math.PI / 2
+    );
+    // Dynamic bearing from GPS/IMU (clockwise from north)
+    var rotZ = new THREE.Matrix4().makeRotationAxis(
+      new THREE.Vector3(0, 0, 1), -t.bearing * Math.PI / 180
+    );
 
-  var snowcatMarker = new maplibregl.Marker({
-    element: snowcatEl,
-    anchor: 'center',
-    occludedOpacity: 1
-  }).setLngLat([bootLon, bootLat]).setPopup(popup).addTo(map);
+    // Support both MapLibre 4.x (args.defaultProjectionData.mainMatrix)
+    // and older versions where args itself was the raw matrix array.
+    var rawMatrix = (args && args.defaultProjectionData)
+      ? args.defaultProjectionData.mainMatrix
+      : args;
+    var proj = new THREE.Matrix4().fromArray(rawMatrix);
+    var local = new THREE.Matrix4()
+      .makeTranslation(t.tx, t.ty, t.tz)
+      .scale(new THREE.Vector3(t.scale, -t.scale, t.scale))
+      .multiply(rotZ)
+      .multiply(rotZ_init)
+      .multiply(rotX);
 
-  // ── GPS dot marker ────────────────────────────────────────────────────
+    this.camera.projectionMatrix = proj.multiply(local);
+    this.renderer.resetState();
+    this.renderer.render(this.scene, this.camera);
+    this._map.triggerRepaint();
+  }
+};
+
+// ── Map load ──────────────────────────────────────────────────────────────────
+map.on('load', function() {
+  map.addLayer(snowcatLayer);
+
+  // GPS dot fallback marker
   var dotEl = document.createElement('div');
   dotEl.style.cssText = [
-    'width:20px','height:20px','border-radius:50%',
-    'background:#00b4d8','border:3px solid #fff',
+    'width:20px', 'height:20px', 'border-radius:50%',
+    'background:#00b4d8', 'border:3px solid #fff',
     'box-shadow:0 0 12px rgba(0,180,216,0.9)'
   ].join(';');
 
-  var dotMarker = new maplibregl.Marker({
+  window._dotMarker = new maplibregl.Marker({
     element: dotEl,
     occludedOpacity: 1
   }).setLngLat([bootLon, bootLat]).addTo(map);
 
-  window._markers = {snowcat: snowcatMarker, dot: dotMarker};
-
-  // Apply initial style baked in at page-build time
-  setMarkerStyle('INIT_MARKER_STYLE_PH');
+  // Apply the initial marker style baked in at HTML build time
+  window.setMarkerStyle('INIT_MARKER_STYLE_PH');
 });
 
+// ── Global JS API (called from Python via wv.run_javascript) ─────────────────
 window.setMarkerStyle = function(style) {
-  if (!window._markers) {
-    window._pendingStyle = style;
-    return;
+  window._showSnowcat = (style === 'snowcat');
+  if (window._dotMarker) {
+    window._dotMarker.getElement().style.display =
+      (style === 'dot') ? '' : 'none';
   }
-  var show = function(el) { el.style.display = ''; };
-  var hide = function(el) { el.style.display = 'none'; };
-  if (style === 'snowcat') {
-    show(window._markers.snowcat.getElement());
-    hide(window._markers.dot.getElement());
-  } else {
-    hide(window._markers.snowcat.getElement());
-    show(window._markers.dot.getElement());
-  }
+  map.triggerRepaint();
 };
-
-function setBasemap(name) {
-  map.setLayoutProperty('topo-layer',  'visibility',
-    name==='topo'   ? 'visible':'none');
-  map.setLayoutProperty('aerial-layer','visibility',
-    name==='aerial' ? 'visible':'none');
-  document.getElementById('btn-topo')
-    .classList.toggle('active', name==='topo');
-  document.getElementById('btn-aerial')
-    .classList.toggle('active', name==='aerial');
-}
 
 window.moveMarker = function(lat, lon, bearing) {
-  if (window._markers) {
-    window._markers.snowcat.setLngLat([lon, lat]);
-    window._markers.dot.setLngLat([lon, lat]);
-  }
-  map.easeTo({center:[lon, lat], bearing:bearing, duration:200});
+  window._modelLat     = lat;
+  window._modelLon     = lon;
+  window._modelBearing = bearing;
+  if (window._dotMarker) window._dotMarker.setLngLat([lon, lat]);
+  map.easeTo({center: [lon, lat], duration: 200});
+  map.triggerRepaint();
 };
+
+window.setBasemap = function(name) {
+  map.setLayoutProperty('topo-layer',   'visibility',
+    name === 'topo'   ? 'visible' : 'none');
+  map.setLayoutProperty('aerial-layer', 'visibility',
+    name === 'aerial' ? 'visible' : 'none');
+  document.getElementById('btn-topo')
+    .classList.toggle('active', name === 'topo');
+  document.getElementById('btn-aerial')
+    .classList.toggle('active', name === 'aerial');
+};
+
 </script>
 </body>
 </html>
@@ -237,8 +364,8 @@ def _build_map_html(lat: float, lon: float, marker_style: str = "snowcat") -> st
         .replace("TOPO_PH",   _TOPO_TILES)
         .replace("AERIAL_PH", _AERIAL_TILES)
         .replace("DEM_PH",    _DEM_TILES)
-        .replace("SNOWCAT_DATA_URL_PH",    _SNOWCAT_DATA_URL)
-        .replace("INIT_MARKER_STYLE_PH",   marker_style)
+        .replace("GLB_B64_PH", _SNOWCAT_GLB_B64)
+        .replace("INIT_MARKER_STYLE_PH", marker_style)
     )
 
 
@@ -284,7 +411,6 @@ class _WebkitHost:
         from gi.repository import GLib, Gtk, WebKit2
 
         if self._win is not None:
-            # Window already exists — reposition and reveal it
             win = self._win
             def _reshow():
                 win.move(x, y)
@@ -294,9 +420,6 @@ class _WebkitHost:
             GLib.idle_add(_reshow)
             return True
 
-        # First visit: create the GTK window on a daemon thread that runs
-        # its own GLib main loop.  The loop (and thread) live for the entire
-        # lifetime of the process — we never destroy the WebView, only hide it.
         loop = GLib.MainLoop()
 
         def _gtk_thread():
@@ -308,9 +431,13 @@ class _WebkitHost:
                 settings.set_hardware_acceleration_policy(
                     WebKit2.HardwareAccelerationPolicy.ALWAYS
                 )
+                # Allow the page (loaded from file://) to fetch local assets
+                settings.set_allow_file_access_from_file_urls(True)
+                settings.set_allow_universal_access_from_file_urls(True)
 
                 wv = WebKit2.WebView.new_with_settings(settings)
-                wv.load_html(html, "file:///")
+                # Use project root as base URL so assets/ resolves correctly
+                wv.load_html(html, _BASE_URL)
                 self._webview = wv
 
                 win = Gtk.Window()
@@ -320,8 +447,6 @@ class _WebkitHost:
                 win.set_default_size(w, h)
                 win.add(wv)
 
-                # Set override_redirect before mapping so the window manager
-                # never touches this window (no title bar, no decorations).
                 win.realize()
                 win.get_window().set_override_redirect(True)
 
@@ -329,19 +454,15 @@ class _WebkitHost:
                 win.show_all()
 
                 self._win = win
-                return False  # don't repeat
+                return False
 
             GLib.idle_add(_build)
-            loop.run()  # runs until process exits
+            loop.run()
 
         threading.Thread(target=_gtk_thread, daemon=True).start()
         return True
 
     def hide(self) -> None:
-        """
-        Hide the WebKit window instantly.  The GTK thread and WebView stay
-        alive so re-entering the map screen is instant with no teardown risk.
-        """
         if self._win is None:
             return
         try:
@@ -352,7 +473,7 @@ class _WebkitHost:
             pass
 
     def set_marker_style(self, style: str) -> None:
-        """Inject JS to switch the visible marker ('snowcat' or 'dot')."""
+        """Inject JS to switch between 3D model ('snowcat') and GPS dot ('dot')."""
         if self._webview is None:
             return
         try:
@@ -388,16 +509,13 @@ class MapScreen(Screen):
         )
         self._clock = Clock.schedule_interval(self._tick_clock, 1)
         self._tick_clock(0)
-        # Give layout one more frame to finalise sizes before measuring
         Clock.schedule_once(self._start_webview, 0.1)
 
     def _start_webview(self, _dt=None):
         ph = self.ids.map_placeholder
 
-        # Widget bottom-left in Kivy window coords (Y=0 at bottom of window)
         win_x, win_y_bot = ph.to_window(0, 0)
 
-        # Convert to screen top-left (Y=0 at top of screen)
         win_left = int(getattr(Window, "left", 0))
         win_top  = int(getattr(Window, "top",  0))
         screen_x = win_left + int(win_x)
@@ -415,7 +533,6 @@ class MapScreen(Screen):
         if not ok:
             self.ids.map_no_browser.opacity = 1
         else:
-            # Sync style on every visit (window may already exist from a prior visit)
             self._webkit.set_marker_style(marker_style)
 
     def on_leave(self):
