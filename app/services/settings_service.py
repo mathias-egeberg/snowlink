@@ -14,7 +14,10 @@ _DEFAULTS = {
         'mountpoint': '',
         'username': '',
         'password': '',
-    }
+    },
+    'map': {
+        'marker_style': 'snowcat',   # 'snowcat' | 'dot'
+    },
 }
 
 

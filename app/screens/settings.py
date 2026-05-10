@@ -11,15 +11,18 @@ from app.services.settings_service import SettingsService
 class SettingsScreen(Screen):
     app_version   = StringProperty(APP_VERSION)
     ntrip_enabled = BooleanProperty(False)
+    marker_style  = StringProperty('snowcat')   # 'snowcat' | 'dot'
 
     def on_enter(self):
-        ntrip = SettingsService.load()['ntrip']
+        data  = SettingsService.load()
+        ntrip = data['ntrip']
         self.ntrip_enabled           = ntrip['enabled']
         self.ids.inp_host.text       = ntrip['host']
         self.ids.inp_port.text       = ntrip['port']
         self.ids.inp_mountpoint.text = ntrip['mountpoint']
         self.ids.inp_username.text   = ntrip['username']
         self.ids.inp_password.text   = ntrip['password']
+        self.marker_style            = data['map']['marker_style']
         self._clock_event = Clock.schedule_interval(self._tick_clock, 1)
         self._tick_clock(0)
 
@@ -36,6 +39,11 @@ class SettingsScreen(Screen):
         self.ntrip_enabled = not self.ntrip_enabled
         data = SettingsService.load()
         data['ntrip']['enabled'] = self.ntrip_enabled
+        SettingsService.save()
+
+    def toggle_marker_style(self):
+        self.marker_style = 'dot' if self.marker_style == 'snowcat' else 'snowcat'
+        SettingsService.load()['map']['marker_style'] = self.marker_style
         SettingsService.save()
 
     def save_ntrip(self):

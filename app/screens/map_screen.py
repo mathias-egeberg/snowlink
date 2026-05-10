@@ -149,41 +149,61 @@ map.addControl(
 );
 
 map.on('load', function() {
-  var el = document.createElement('div');
-  el.style.cssText = 'position:relative;width:110px';
+  var popup = new maplibregl.Popup({offset: 14})
+    .setHTML(
+      '<div style="font-family:sans-serif;font-size:12px;line-height:1.8">' +
+      '<strong>Snowcat position</strong><br/>' +
+      bootLat.toFixed(7) + '° N<br/>' +
+      bootLon.toFixed(7) + '° E</div>'
+    );
 
+  // ── Snowcat model marker ──────────────────────────────────────────────
+  var snowcatEl = document.createElement('div');
   var img = document.createElement('img');
   img.src = 'SNOWCAT_DATA_URL_PH';
-  img.style.cssText = [
-    'width:110px','display:block',
-    'filter:drop-shadow(0 3px 10px rgba(0,0,0,0.85))'
-  ].join(';');
-  el.appendChild(img);
+  img.style.cssText = 'width:120px;display:block';
+  snowcatEl.appendChild(img);
 
-  // Small GPS dot below the centre of the machine
-  var dot = document.createElement('div');
-  dot.style.cssText = [
-    'position:absolute','bottom:-6px','left:50%',
-    'transform:translateX(-50%)',
-    'width:10px','height:10px','border-radius:50%',
-    'background:#00b4d8','border:2px solid #fff',
-    'box-shadow:0 0 8px rgba(0,180,216,0.9)'
-  ].join(';');
-  el.appendChild(dot);
+  var snowcatMarker = new maplibregl.Marker({
+    element: snowcatEl,
+    anchor: 'center',
+    occludedOpacity: 1
+  }).setLngLat([bootLon, bootLat]).setPopup(popup).addTo(map);
 
-  window._snowcatMarker = new maplibregl.Marker({element: el, anchor: 'bottom'})
-    .setLngLat([bootLon, bootLat])
-    .setPopup(
-      new maplibregl.Popup({offset: 14})
-        .setHTML(
-          '<div style="font-family:sans-serif;font-size:12px;line-height:1.8">' +
-          '<strong>Snowcat position</strong><br/>' +
-          bootLat.toFixed(7) + '° N<br/>' +
-          bootLon.toFixed(7) + '° E</div>'
-        )
-    )
-    .addTo(map);
+  // ── GPS dot marker ────────────────────────────────────────────────────
+  var dotEl = document.createElement('div');
+  dotEl.style.cssText = [
+    'width:20px','height:20px','border-radius:50%',
+    'background:#00b4d8','border:3px solid #fff',
+    'box-shadow:0 0 12px rgba(0,180,216,0.9)'
+  ].join(';');
+
+  var dotMarker = new maplibregl.Marker({
+    element: dotEl,
+    occludedOpacity: 1
+  }).setLngLat([bootLon, bootLat]).addTo(map);
+
+  window._markers = {snowcat: snowcatMarker, dot: dotMarker};
+
+  // Apply initial style baked in at page-build time
+  setMarkerStyle('INIT_MARKER_STYLE_PH');
 });
+
+window.setMarkerStyle = function(style) {
+  if (!window._markers) {
+    window._pendingStyle = style;
+    return;
+  }
+  var show = function(el) { el.style.display = ''; };
+  var hide = function(el) { el.style.display = 'none'; };
+  if (style === 'snowcat') {
+    show(window._markers.snowcat.getElement());
+    hide(window._markers.dot.getElement());
+  } else {
+    hide(window._markers.snowcat.getElement());
+    show(window._markers.dot.getElement());
+  }
+};
 
 function setBasemap(name) {
   map.setLayoutProperty('topo-layer',  'visibility',
@@ -197,8 +217,9 @@ function setBasemap(name) {
 }
 
 window.moveMarker = function(lat, lon, bearing) {
-  if (window._snowcatMarker) {
-    window._snowcatMarker.setLngLat([lon, lat]);
+  if (window._markers) {
+    window._markers.snowcat.setLngLat([lon, lat]);
+    window._markers.dot.setLngLat([lon, lat]);
   }
   map.easeTo({center:[lon, lat], bearing:bearing, duration:200});
 };
@@ -208,7 +229,7 @@ window.moveMarker = function(lat, lon, bearing) {
 """
 
 
-def _build_map_html(lat: float, lon: float) -> str:
+def _build_map_html(lat: float, lon: float, marker_style: str = "snowcat") -> str:
     return (
         _MAP_HTML
         .replace("BOOT_LAT_PH", f"{lat:.8f}")
@@ -216,7 +237,8 @@ def _build_map_html(lat: float, lon: float) -> str:
         .replace("TOPO_PH",   _TOPO_TILES)
         .replace("AERIAL_PH", _AERIAL_TILES)
         .replace("DEM_PH",    _DEM_TILES)
-        .replace("SNOWCAT_DATA_URL_PH", _SNOWCAT_DATA_URL)
+        .replace("SNOWCAT_DATA_URL_PH",    _SNOWCAT_DATA_URL)
+        .replace("INIT_MARKER_STYLE_PH",   marker_style)
     )
 
 
@@ -233,7 +255,8 @@ class _WebkitHost:
     """
 
     def __init__(self):
-        self._win: Optional[object] = None
+        self._win:     Optional[object] = None
+        self._webview: Optional[object] = None
         self._available: Optional[bool] = None  # None = untested
 
     def _gtk_available(self) -> bool:
@@ -288,6 +311,7 @@ class _WebkitHost:
 
                 wv = WebKit2.WebView.new_with_settings(settings)
                 wv.load_html(html, "file:///")
+                self._webview = wv
 
                 win = Gtk.Window()
                 win.set_decorated(False)
@@ -324,6 +348,18 @@ class _WebkitHost:
             from gi.repository import GLib
             win = self._win
             GLib.idle_add(win.hide)
+        except ImportError:
+            pass
+
+    def set_marker_style(self, style: str) -> None:
+        """Inject JS to switch the visible marker ('snowcat' or 'dot')."""
+        if self._webview is None:
+            return
+        try:
+            from gi.repository import GLib
+            wv = self._webview
+            script = f"if(window.setMarkerStyle){{setMarkerStyle('{style}');}}"
+            GLib.idle_add(lambda: wv.run_javascript(script, None, None, None) or False)
         except ImportError:
             pass
 
@@ -367,7 +403,10 @@ class MapScreen(Screen):
         screen_x = win_left + int(win_x)
         screen_y = win_top  + int(Window.height - win_y_bot - ph.height)
 
-        html = _build_map_html(BOOT_LAT, BOOT_LON)
+        from app.services.settings_service import SettingsService
+        marker_style = SettingsService.load()['map']['marker_style']
+
+        html = _build_map_html(BOOT_LAT, BOOT_LON, marker_style)
         ok = self._webkit.show(
             html,
             screen_x, screen_y,
@@ -375,6 +414,9 @@ class MapScreen(Screen):
         )
         if not ok:
             self.ids.map_no_browser.opacity = 1
+        else:
+            # Sync style on every visit (window may already exist from a prior visit)
+            self._webkit.set_marker_style(marker_style)
 
     def on_leave(self):
         ds = DataService.get()
