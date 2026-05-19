@@ -1,0 +1,4 @@
+# SnowLink – Web Backend (cross-platform, Python 3.11+)
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+pyserial>=3.5
