@@ -148,8 +148,30 @@ const Settings = (() => {
     }
   }
 
-  // ── IMU status (live from WebSocket) ───────────────────────────────
-  function _renderImuStatus(s) {
+  // ── Connection indicator helper ────────────────────────────────────
+  function _setConn(id, ok, warn = false) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.toggle('ok',      ok && !warn);
+    el.classList.toggle('warning', !ok && warn);
+  }
+
+  // ── IMU status + header indicators (live from WebSocket) ───────────
+  function _renderState(s) {
+    // GPS badge
+    const gpsTxt = document.getElementById('set-gps-text');
+    if (gpsTxt) {
+      gpsTxt.textContent = s.gps_status_text ?? 'No Fix';
+      const cls = s.gps_ok ? 'ok' : (s.gps_float_rtk ? 'warning' : 'danger');
+      gpsTxt.className = `badge-value ${cls}`;
+    }
+
+    // Connection indicators
+    _setConn('ind-set-5g',  s.cellular_ok);
+    _setConn('ind-set-gps', s.gps_ok, s.gps_float_rtk);
+    _setConn('ind-set-imu', s.imu_ok);
+
+    // IMU calibration row
     const status = document.getElementById('imu-heading-status');
     const btn    = document.getElementById('btn-calibrate-imu');
     const can    = s.imu_ok && s.imu_yaw_valid;
@@ -176,7 +198,7 @@ const Settings = (() => {
   // ── Subscriptions ──────────────────────────────────────────────────
   AppState.subscribe((s) => {
     if (document.getElementById('screen-settings')?.classList.contains('active')) {
-      _renderImuStatus(s);
+      _renderState(s);
     }
   });
 
@@ -185,7 +207,7 @@ const Settings = (() => {
       startClock();
       if (!_loaded) await loadSettings();
       const s = AppState.get();
-      if (s && Object.keys(s).length) _renderImuStatus(s);
+      if (s && Object.keys(s).length) _renderState(s);
 
       // App version from state (state includes version via API in future;
       // for now display the static string embedded in the page).
