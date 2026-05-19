@@ -368,7 +368,21 @@
     <button class="nav-btn" data-screen="settings" onclick="Nav.go('settings')">
       Settings
     </button>
+    <button class="nav-btn exit-btn" onclick="ExitDialog.show()">
+      &#x23FB; Exit
+    </button>
   </nav>
+
+  <!-- Exit confirmation dialog -->
+  <div id="exit-overlay" class="exit-overlay hidden" onclick="ExitDialog.hide()">
+    <div class="exit-dialog" onclick="event.stopPropagation()">
+      <p class="exit-dialog-title">Shut down SnowLink?</p>
+      <div class="exit-dialog-actions">
+        <button class="exit-dialog-btn cancel" onclick="ExitDialog.hide()">Cancel</button>
+        <button class="exit-dialog-btn confirm" onclick="ExitDialog.confirm()">Shut Down</button>
+      </div>
+    </div>
+  </div>
 
 </div><!-- /app -->
 

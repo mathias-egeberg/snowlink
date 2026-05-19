@@ -5,15 +5,30 @@
  * All screen modules are already loaded by <script> tags above this file.
  */
 (async () => {
-  // Connect WebSocket (will auto-reconnect on disconnect).
   WS.connect();
 
-  // Hydrate state from REST so the UI is populated before the first WS
-  // message arrives (which can take up to 200 ms).
   try {
     const snapshot = await API.getState();
     AppState.update(snapshot);
   } catch (e) {
     console.warn('[app] initial state fetch failed', e);
   }
+})();
+
+const ExitDialog = (() => {
+  const overlay = () => document.getElementById('exit-overlay');
+
+  function show() { overlay().classList.remove('hidden'); }
+  function hide() { overlay().classList.add('hidden'); }
+
+  async function confirm() {
+    try {
+      await fetch('/api/exit', { method: 'POST' });
+    } catch (_) {
+      // Backend shut down before the response arrived — that's fine.
+    }
+    window.close();
+  }
+
+  return { show, hide, confirm };
 })();

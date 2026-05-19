@@ -4,7 +4,6 @@
  * Ported from app/screens/map_screen.py.
  * Features:
  *   - Kartverket topo tiles + Esri aerial toggle
- *   - AWS Terrarium 3-D terrain + hillshade
  *   - Snowcat 3-D GLB model rendered via Three.js custom layer sharing
  *     MapLibre's WebGL context
  *   - GPS dot fallback marker
@@ -24,7 +23,6 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 // ── Tile sources (identical to Raven appsettings.desktop.json) ────────────
 const TOPO_TILES   = 'https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png';
 const AERIAL_TILES = 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
-const DEM_TILES    = 'https://elevation-tiles-prod.s3.amazonaws.com/terrarium/{z}/{x}/{y}.png';
 
 // ── Default position (used when GPS is unavailable) ───────────────────────
 const DEFAULT_LAT = 60.0137563;
@@ -64,6 +62,8 @@ function mercatorTransform(lat, lon, bearingDeg) {
 }
 
 // ── Three.js custom layer ──────────────────────────────────────────────────
+let _modelLoaded = false;
+
 const snowcatLayer = {
   id: 'snowcat-3d',
   type: 'custom',
@@ -74,7 +74,6 @@ const snowcatLayer = {
     this.camera  = new THREE.Camera();
     this.scene   = new THREE.Scene();
 
-    // Lighting
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.8));
     const sun = new THREE.DirectionalLight(0xffffff, 1.4);
     sun.position.set(1, -1, 2).normalize();
@@ -83,15 +82,11 @@ const snowcatLayer = {
     fill.position.set(-1, 1, 0.5).normalize();
     this.scene.add(fill);
 
-    // Load the GLB model from the static file server.
-    // In the Kivy version this was embedded as base64; here we fetch
-    // it directly because the web server serves /assets/.
     const loader = new GLTFLoader();
     fetch('/assets/snowcat.glb')
       .then(r => r.arrayBuffer())
       .then(buf => {
         loader.parse(buf, '', (gltf) => {
-          // Enable vertex colours (COLOR_0 attributes exported by trimesh)
           gltf.scene.traverse((child) => {
             if (child.isMesh && child.geometry.attributes.color) {
               const mats = Array.isArray(child.material)
@@ -100,32 +95,30 @@ const snowcatLayer = {
             }
           });
           this.scene.add(gltf.scene);
+          _modelLoaded = true;
           map.triggerRepaint();
         }, (err) => console.error('[snowcat-3d] parse error:', err));
       })
       .catch(err => console.error('[snowcat-3d] fetch error:', err));
 
-    // Share MapLibre's canvas + WebGL context with Three.js
+    // Share MapLibre's WebGL context — use powerPreference hint to avoid
+    // context loss on low-end GPU (Raspberry Pi VideoCore).
     this.renderer = new THREE.WebGLRenderer({
       canvas: map.getCanvas(),
       context: gl,
       antialias: true,
+      powerPreference: 'low-power',
     });
     this.renderer.autoClear = false;
   },
 
   render(gl, args) {
-    if (!_showSnowcat) return;
+    // Skip rendering until the model is loaded — prevents empty Three.js
+    // render passes from corrupting MapLibre's WebGL state on every frame.
+    if (!_showSnowcat || !_modelLoaded) return;
 
     const t = mercatorTransform(_modelLat, _modelLon, _modelBearing);
 
-    // Axis rotations:
-    //   rotX: identity (GLTF Y-up → Mercator with no pitch needed here)
-    //   rotZ_init: fixed 90° offset so model faces its natural forward
-    //   rotZ: dynamic bearing from GPS/IMU (clockwise-from-north)
-    const rotX = new THREE.Matrix4().makeRotationAxis(
-      new THREE.Vector3(1, 0, 0), 0
-    );
     const rotZ_init = new THREE.Matrix4().makeRotationAxis(
       new THREE.Vector3(0, 0, 1), -Math.PI / 2
     );
@@ -142,13 +135,13 @@ const snowcatLayer = {
       .makeTranslation(t.tx, t.ty, t.tz)
       .scale(new THREE.Vector3(t.scale, -t.scale, t.scale))
       .multiply(rotZ)
-      .multiply(rotZ_init)
-      .multiply(rotX);
+      .multiply(rotZ_init);
 
     this.camera.projectionMatrix = proj.multiply(local);
     this.renderer.resetState();
     this.renderer.render(this.scene, this.camera);
-    this._map.triggerRepaint();
+    // triggerRepaint() removed from here — the model is static between GPS
+    // updates; re-render is triggered by moveMarker() and setMarkerStyle().
   },
 };
 
@@ -207,7 +200,6 @@ function initMap(initialState) {
     maxPitch: 85,
     touchZoomRotate: true,
     dragRotate: true,
-    canvasContextAttributes: { antialias: true },
     style: {
       version: 8,
       sources: {
@@ -223,26 +215,13 @@ function initMap(initialState) {
           tileSize: 256, maxzoom: 18,
           attribution: '© Esri',
         },
-        dem: {
-          type: 'raster-dem',
-          tiles: [DEM_TILES],
-          tileSize: 256, encoding: 'terrarium', maxzoom: 16,
-        },
       },
       layers: [
         { id: 'topo-layer',   type: 'raster', source: 'topo',
           layout: { visibility: 'visible' } },
         { id: 'aerial-layer', type: 'raster', source: 'aerial',
           layout: { visibility: 'none' } },
-        { id: 'hillshade', type: 'hillshade', source: 'dem',
-          paint: {
-            'hillshade-shadow-color': '#1a2a3a',
-            'hillshade-illumination-direction': 335,
-            'hillshade-exaggeration': 0.4,
-          },
-        },
       ],
-      terrain: { source: 'dem', exaggeration: 1.5 },
     },
   });
 

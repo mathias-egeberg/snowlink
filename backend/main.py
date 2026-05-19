@@ -14,6 +14,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import signal
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -94,6 +96,13 @@ app.include_router(_control_router,  prefix="/api")
 @app.get("/")
 async def serve_index():
     return FileResponse(str(FRONTEND_DIR / "index.html"))
+
+
+@app.post("/api/exit")
+async def exit_app():
+    """Gracefully shut down the backend (and with it the kiosk script kills Chromium)."""
+    os.kill(os.getpid(), signal.SIGTERM)
+    return {"ok": True}
 
 
 # ── WebSocket ─────────────────────────────────────────────────────────────────

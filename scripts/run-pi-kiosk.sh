@@ -29,7 +29,8 @@ done
 
 # ── Chromium kiosk ────────────────────────────────────────────────────────
 echo "[kiosk] Launching Chromium..."
-chromium-browser \
+CHROMIUM_BIN=$(command -v chromium-browser || command -v chromium)
+$CHROMIUM_BIN \
     --kiosk \
     --noerrdialogs \
     --disable-infobars \
