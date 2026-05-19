@@ -30,6 +30,7 @@ done
 # ── Chromium kiosk ────────────────────────────────────────────────────────
 echo "[kiosk] Launching Chromium..."
 CHROMIUM_BIN=$(command -v chromium-browser || command -v chromium)
+export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
 $CHROMIUM_BIN \
     --kiosk \
     --noerrdialogs \
@@ -38,6 +39,9 @@ $CHROMIUM_BIN \
     --disable-restore-session-state \
     --disable-features=Translate \
     --no-first-run \
+    --ozone-platform=wayland \
+    --disk-cache-size=1 \
+    --remote-debugging-port=9222 \
     --app=http://127.0.0.1:8000 \
     &
 
