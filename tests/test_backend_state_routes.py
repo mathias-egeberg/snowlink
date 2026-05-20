@@ -16,6 +16,9 @@ class BackendStateRoutesTest(unittest.TestCase):
         self.assertIn('imu_yaw_deg', snapshot)
         self.assertIn('cellular_status_text', snapshot)
         self.assertIn('cellular_bytes_total', snapshot)
+        self.assertIn('cellular_usage_reset_at_ms', snapshot)
+        self.assertIn('cellular_speed_test_status', snapshot)
+        self.assertIn('cellular_signal_quality_pct', snapshot)
 
 
 if __name__ == '__main__':

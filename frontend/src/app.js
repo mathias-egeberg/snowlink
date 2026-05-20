@@ -54,16 +54,42 @@ window.addEventListener('beforeunload', stopStatePolling);
     { key: 'set',  gpsId: 'set-gps-text'  },
   ];
 
-  function _setConn(id, ok, warn) {
+  function _signalLevel(s) {
+    const quality = Number(s.cellular_signal_quality_pct);
+    if (Number.isFinite(quality) && quality > 0) {
+      if (quality >= 80) return 4;
+      if (quality >= 60) return 3;
+      if (quality >= 35) return 2;
+      return 1;
+    }
+    if (s.cellular_ok) return 3;
+    if (s.cellular_detected) return 1;
+    return 0;
+  }
+
+  function _setSignalClasses(el, s) {
+    for (let level = 0; level <= 4; level += 1) {
+      el.classList.remove('signal-level-' + level);
+    }
+    el.classList.add('signal-level-' + _signalLevel(s));
+    el.classList.toggle('speed-testing', !!s.cellular_speed_test_running);
+    const status = s.cellular_status_text ?? 'No modem';
+    const quality = s.cellular_signal_quality_text ?? 'No signal';
+    const speed = s.cellular_speed_test_status ?? 'Never run';
+    el.title = `Cellular: ${status} · ${quality} · Speed test: ${speed}`;
+  }
+
+  function _setConn(id, ok, warn, s) {
     const el = document.getElementById(id);
     if (!el) return;
     el.classList.toggle('ok',      !!ok && !warn);
     el.classList.toggle('warning', !ok && !!warn);
+    if (id.endsWith('-5g') && s) _setSignalClasses(el, s);
   }
 
   AppState.subscribe(function (s) {
     for (const sc of SCREENS) {
-      _setConn('ind-' + sc.key + '-5g',  s.cellular_ok);
+      _setConn('ind-' + sc.key + '-5g',  s.cellular_ok, s.cellular_detected && !s.cellular_ok, s);
       _setConn('ind-' + sc.key + '-gps', s.gps_ok, s.gps_float_rtk);
       _setConn('ind-' + sc.key + '-imu', s.imu_ok);
 
@@ -75,6 +101,26 @@ window.addEventListener('beforeunload', stopStatePolling);
       }
     }
   });
+}());
+
+(function () {
+  function runSpeedTestFromHeader(event) {
+    event.preventDefault();
+    if (typeof Settings !== 'undefined' && Settings.runCellularSpeedTest) {
+      Settings.runCellularSpeedTest();
+    }
+  }
+
+  for (const el of document.querySelectorAll('[id^="ind-"][id$="-5g"]')) {
+    el.classList.add('cellular-action');
+    el.setAttribute('role', 'button');
+    el.setAttribute('tabindex', '0');
+    el.setAttribute('aria-label', 'Run cellular speed test');
+    el.addEventListener('click', runSpeedTestFromHeader);
+    el.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') runSpeedTestFromHeader(event);
+    });
+  }
 }());
 
 const ExitDialog = (() => {

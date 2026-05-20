@@ -26,6 +26,11 @@ class AppStateDefaultsTest(unittest.TestCase):
         self.assertEqual(s.cellular_bytes_received, 0)
         self.assertEqual(s.cellular_bytes_sent, 0)
         self.assertEqual(s.cellular_bytes_total, 0)
+        self.assertEqual(s.cellular_usage_reset_at_ms, 0)
+        self.assertEqual(s.cellular_signal_quality_pct, 0)
+        self.assertEqual(s.cellular_signal_quality_text, "No signal")
+        self.assertFalse(s.cellular_speed_test_running)
+        self.assertEqual(s.cellular_speed_test_status, "Never run")
 
 
 class StateManagerTest(unittest.TestCase):
@@ -99,6 +104,8 @@ class StateManagerTest(unittest.TestCase):
             cellular_bytes_received=1024,
             cellular_bytes_sent=512,
             cellular_bytes_total=1536,
+            cellular_signal_quality_pct=80,
+            cellular_signal_quality_text='Good',
         )
         snap = self.mgr.get_snapshot()
         self.assertTrue(snap['cellular_detected'])
@@ -106,6 +113,8 @@ class StateManagerTest(unittest.TestCase):
         self.assertEqual(snap['cellular_bytes_received'], 1024)
         self.assertEqual(snap['cellular_bytes_sent'], 512)
         self.assertEqual(snap['cellular_bytes_total'], 1536)
+        self.assertEqual(snap['cellular_signal_quality_pct'], 80)
+        self.assertEqual(snap['cellular_signal_quality_text'], 'Good')
 
 
 if __name__ == '__main__':

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import http.client
 import re
 import socket
 import struct
@@ -9,6 +10,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+import xml.etree.ElementTree as ET
 
 try:
     import fcntl
@@ -20,10 +22,12 @@ _SYS_CLASS_NET = Path('/sys/class/net')
 _FALLBACK_IFACE_PREFIXES = ('wwan', 'usb', 'ppp', 'rmnet', 'enx')
 _INTERNET_TARGETS = (('1.1.1.1', 443), ('8.8.8.8', 53))
 _CONNECT_TIMEOUT_SECONDS = 1.5
+_SIGNAL_TIMEOUT_SECONDS = 1.2
 _REACHABILITY_SUCCESS_TTL_SECONDS = 30.0
 _REACHABILITY_FAILURE_TTL_SECONDS = 15.0
 _VALID_IFACE_RE = re.compile(r'^[A-Za-z0-9_.:-]{1,15}$')
 _HEX_ID_RE = re.compile(r'^[0-9a-fA-F]{4}$')
+_SIGNAL_VALUE_RE = re.compile(r'-?\d+(?:\.\d+)?')
 _reachability_cache: dict[tuple[str, str], tuple[bool, float]] = {}
 _reachability_cache_lock = threading.Lock()
 log = logging.getLogger('snowlink.cellular')
@@ -43,6 +47,8 @@ class CellularProbeResult:
     product_id: str | None = None
     manufacturer: str | None = None
     product: str | None = None
+    signal_quality_pct: int = 0
+    signal_quality_text: str = 'No signal'
 
     @property
     def ok(self) -> bool:
@@ -221,11 +227,135 @@ def _internet_reachable(iface: str, source_ip: str) -> bool:
     return reachable
 
 
+def _iface_gateway_ipv4(iface: str) -> str | None:
+    try:
+        with Path('/proc/net/route').open(encoding='utf-8') as route_file:
+            lines = route_file.readlines()[1:]
+    except OSError:
+        return None
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 3 or parts[0] != iface or parts[1] != '00000000':
+            continue
+        try:
+            return socket.inet_ntoa(struct.pack('<L', int(parts[2], 16)))
+        except (OSError, ValueError):
+            return None
+    return None
+
+
+def _gateway_candidates(iface: str, source_ip: str) -> list[str]:
+    candidates: list[str] = []
+    seen: set[str] = set()
+    def add(candidate: str | None) -> None:
+        if candidate and candidate not in seen:
+            candidates.append(candidate)
+            seen.add(candidate)
+
+    gateway = _iface_gateway_ipv4(iface)
+    add(gateway)
+    if source_ip.startswith('192.168.8.'):
+        add('192.168.8.1')
+    parts = source_ip.split('.')
+    if len(parts) == 4:
+        add('.'.join([parts[0], parts[1], parts[2], '1']))
+    return candidates
+
+
+def _numeric_signal(value: str | None) -> float | None:
+    if not value:
+        return None
+    match = _SIGNAL_VALUE_RE.search(value)
+    if not match:
+        return None
+    try:
+        return float(match.group(0))
+    except ValueError:
+        return None
+
+
+def _quality_label(pct: int) -> str:
+    if pct >= 80:
+        return 'Excellent'
+    if pct >= 60:
+        return 'Good'
+    if pct >= 35:
+        return 'Fair'
+    if pct > 0:
+        return 'Poor'
+    return 'No signal'
+
+
+def _quality_from_range(value: float, low: float, high: float) -> tuple[int, str]:
+    pct = round(max(0.0, min(1.0, (value - low) / (high - low))) * 100)
+    return pct, _quality_label(pct)
+
+
+def _signal_quality_from_xml(xml_text: str) -> tuple[int, str] | None:
+    lowered = xml_text[:256].lower()
+    if len(xml_text) > 4096 or '<!doctype' in lowered or '<!entity' in lowered:
+        return None
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return None
+    values = {child.tag.lower(): (child.text or '').strip() for child in root}
+    rsrp = _numeric_signal(values.get('rsrp'))
+    if rsrp is not None:
+        return _quality_from_range(rsrp, -120.0, -80.0)
+    rssi = _numeric_signal(values.get('rssi'))
+    if rssi is not None:
+        return _quality_from_range(rssi, -113.0, -51.0)
+    return None
+
+
+def _huawei_signal_quality(iface: str, source_ip: str) -> tuple[int, str] | None:
+    for gateway in _gateway_candidates(iface, source_ip):
+        try:
+            conn = http.client.HTTPConnection(
+                gateway,
+                timeout=_SIGNAL_TIMEOUT_SECONDS,
+                source_address=(source_ip, 0),
+            )
+            try:
+                conn.request('GET', '/api/device/signal', headers={'Cache-Control': 'no-cache'})
+                response = conn.getresponse()
+                if response.status != 200:
+                    continue
+                data = response.read(4096).decode('utf-8', errors='replace')
+                quality = _signal_quality_from_xml(data)
+                if quality is not None:
+                    return quality
+            finally:
+                conn.close()
+        except OSError as exc:
+            log.debug("Huawei signal probe failed through %s on %s: %s", gateway, iface, exc)
+    return None
+
+
+def _fallback_signal_quality(detected: bool, ipv4: str | None, internet_reachable: bool) -> tuple[int, str]:
+    if detected and ipv4 and internet_reachable:
+        return 70, 'Connected'
+    if detected and ipv4:
+        return 35, 'No internet'
+    if detected:
+        return 15, 'Detected'
+    return 0, 'No signal'
+
+
 def _result(
     candidate: _InterfaceCandidate,
     ipv4: str | None,
     internet_reachable: bool,
 ) -> CellularProbeResult:
+    quality = None
+    if candidate.is_huawei and ipv4 is not None:
+        quality = _huawei_signal_quality(candidate.name, ipv4)
+    signal_quality_pct, signal_quality_text = quality or _fallback_signal_quality(
+        True,
+        ipv4,
+        internet_reachable,
+    )
     return CellularProbeResult(
         detected=True,
         iface=candidate.name,
@@ -236,6 +366,8 @@ def _result(
         product_id=candidate.product_id,
         manufacturer=candidate.manufacturer,
         product=candidate.product,
+        signal_quality_pct=signal_quality_pct,
+        signal_quality_text=signal_quality_text,
     )
 
 

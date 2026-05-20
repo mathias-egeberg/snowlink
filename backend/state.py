@@ -50,6 +50,15 @@ class AppState:
     cellular_usage_reset_at_ms: int = 0
     cellular_usage_updated_at_ms: int = 0
     cellular_last_checked_at_ms: int = 0
+    cellular_signal_quality_pct: int = 0
+    cellular_signal_quality_text: str = "No signal"
+    cellular_speed_test_running: bool = False
+    cellular_speed_test_status: str = "Never run"
+    cellular_speed_test_download_mbps: float = 0.0
+    cellular_speed_test_upload_mbps: float = 0.0
+    cellular_speed_test_latency_ms: float = 0.0
+    cellular_speed_test_last_run_at_ms: int = 0
+    cellular_speed_test_error: str = ""
     gps_ok: bool = False
     gps_float_rtk: bool = False
     gps_status_text: str = "No Fix"

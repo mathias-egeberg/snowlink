@@ -10,6 +10,8 @@ const Settings = (() => {
   let _markerStyle      = 'snowcat';
   let _imuHeadingEnabled = false;
   let _loaded            = false;
+  let _speedTestRunning  = false;
+  const STATE_RENDER_SETTLE_MS = 400;
 
   // ── Clock ──────────────────────────────────────────────────────────
   let _clockTimer = null;
@@ -163,12 +165,51 @@ const Settings = (() => {
     return `${size.toFixed(decimals)} ${units[unitIndex]}`;
   }
 
+  function _formatMbps(value) {
+    const mbps = Number(value);
+    if (!Number.isFinite(mbps) || mbps <= 0) return '0.0 Mbps';
+    return `${mbps.toFixed(mbps >= 100 ? 0 : 1)} Mbps`;
+  }
+
+  function _formatMs(value) {
+    const ms = Number(value);
+    if (!Number.isFinite(ms) || ms <= 0) return '0 ms';
+    return `${ms.toFixed(ms >= 100 ? 0 : 1)} ms`;
+  }
+
+  function _formatAge(ms) {
+    const timestamp = Number(ms);
+    if (!Number.isFinite(timestamp) || timestamp <= 0) return 'Never';
+    const elapsed = Math.max(0, Date.now() - timestamp);
+    const minutes = Math.floor(elapsed / 60000);
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours} h ${minutes % 60} min ago`;
+    const days = Math.floor(hours / 24);
+    return `${days} d ${hours % 24} h ago`;
+  }
+
+  function _formatDateTime(ms) {
+    const timestamp = Number(ms);
+    if (!Number.isFinite(timestamp) || timestamp <= 0) return 'Never';
+    return new Date(timestamp).toLocaleString('en-GB', {
+      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+  }
+
   function _renderCellular(s) {
     const status = document.getElementById('cellular-status');
     const detail = document.getElementById('cellular-detail');
     const rx = document.getElementById('cellular-rx');
     const tx = document.getElementById('cellular-tx');
     const total = document.getElementById('cellular-total');
+    const resetTime = document.getElementById('cellular-reset-time');
+    const speedStatus = document.getElementById('cellular-speed-status');
+    const download = document.getElementById('cellular-speed-download');
+    const upload = document.getElementById('cellular-speed-upload');
+    const latency = document.getElementById('cellular-speed-latency');
+    const speedBtn = document.getElementById('btn-cellular-speed-test');
 
     if (status) {
       status.textContent = s.cellular_status_text ?? 'No modem';
@@ -185,6 +226,53 @@ const Settings = (() => {
     if (rx) rx.textContent = _formatBytes(s.cellular_bytes_received);
     if (tx) tx.textContent = _formatBytes(s.cellular_bytes_sent);
     if (total) total.textContent = _formatBytes(s.cellular_bytes_total);
+    if (resetTime) {
+      resetTime.textContent = `Last reset: ${_formatDateTime(s.cellular_usage_reset_at_ms)} · ${_formatAge(s.cellular_usage_reset_at_ms)}`;
+    }
+
+    if (speedStatus) {
+      const statusText = s.cellular_speed_test_running
+        ? 'Testing…'
+        : (s.cellular_speed_test_error || s.cellular_speed_test_status || 'Never run');
+      speedStatus.textContent = statusText;
+      speedStatus.className = `settings-row-desc cellular-status ${
+        s.cellular_speed_test_running ? 'warning' : (s.cellular_speed_test_error ? 'danger' : 'ok')
+      }`;
+    }
+    if (download) download.textContent = _formatMbps(s.cellular_speed_test_download_mbps);
+    if (upload) upload.textContent = _formatMbps(s.cellular_speed_test_upload_mbps);
+    if (latency) latency.textContent = _formatMs(s.cellular_speed_test_latency_ms);
+    if (speedBtn) {
+      const running = _speedTestRunning || !!s.cellular_speed_test_running;
+      speedBtn.disabled = running || !s.cellular_ipv4;
+      speedBtn.textContent = running ? 'Testing…' : 'Test';
+      speedBtn.className = `pill-btn ${running ? 'warning' : (s.cellular_ipv4 ? 'accent' : 'inactive')}`;
+    }
+  }
+
+  async function runCellularSpeedTest() {
+    const currentState = AppState.get();
+    if (_speedTestRunning || currentState.cellular_speed_test_running) return;
+    _speedTestRunning = true;
+    const btn = document.getElementById('btn-cellular-speed-test');
+    const status = document.getElementById('cellular-speed-status');
+    if (btn) { btn.textContent = 'Testing…'; btn.disabled = true; btn.className = 'pill-btn warning'; }
+    if (status) { status.textContent = 'Testing…'; status.className = 'settings-row-desc cellular-status warning'; }
+    try {
+      const result = await API.runCellularSpeedTest();
+      if (result.state) AppState.update(result.state);
+      if (btn) btn.textContent = result.ok ? 'Test' : 'Retry';
+    } catch (e) {
+      console.error('[Settings] runCellularSpeedTest error', e);
+      if (status) { status.textContent = 'Speed test failed'; status.className = 'settings-row-desc cellular-status danger'; }
+      if (btn) btn.textContent = 'Retry';
+    } finally {
+      _speedTestRunning = false;
+      setTimeout(() => {
+        const s = AppState.get();
+        if (s && Object.keys(s).length) _renderCellular(s);
+      }, STATE_RENDER_SETTLE_MS);
+    }
   }
 
   async function resetCellularUsage() {
@@ -226,7 +314,7 @@ const Settings = (() => {
     }
 
     // Connection indicators
-    _setConn('ind-set-5g',  s.cellular_ok);
+    _setConn('ind-set-5g',  s.cellular_ok, s.cellular_detected && !s.cellular_ok);
     _setConn('ind-set-gps', s.gps_ok, s.gps_float_rtk);
     _setConn('ind-set-imu', s.imu_ok);
 
@@ -289,5 +377,6 @@ const Settings = (() => {
     toggleImuHeading,
     calibrateImu,
     resetCellularUsage,
+    runCellularSpeedTest,
   };
 })();

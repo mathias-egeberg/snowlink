@@ -95,6 +95,8 @@ class DataService:
             cellular_status_text=result.status_text,
             cellular_is_huawei=result.is_huawei,
             cellular_product=result.product or "",
+            cellular_signal_quality_pct=result.signal_quality_pct,
+            cellular_signal_quality_text=result.signal_quality_text,
             cellular_bytes_received=usage['bytes_received'],
             cellular_bytes_sent=usage['bytes_sent'],
             cellular_bytes_total=usage['bytes_total'],

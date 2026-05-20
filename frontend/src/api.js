@@ -27,5 +27,6 @@ const API = (() => {
     toggleDevice:(key)    => _json('POST', '/api/control/device', { device_key: key }),
     calibrateImu:()       => _json('POST', '/api/settings/calibrate-imu'),
     resetCellularUsage:() => _json('POST', '/api/settings/cellular-usage/reset'),
+    runCellularSpeedTest:() => _json('POST', '/api/settings/cellular-speed-test'),
   };
 })();

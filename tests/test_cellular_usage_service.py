@@ -50,6 +50,7 @@ class CellularUsageServiceTest(unittest.TestCase):
 
         self.assertEqual(reset['bytes_received'], 0)
         self.assertEqual(reset['bytes_sent'], 0)
+        self.assertGreater(reset['reset_at_ms'], 0)
         self.assertEqual(after_reset['bytes_received'], 100)
         self.assertEqual(after_reset['bytes_sent'], 40)
 

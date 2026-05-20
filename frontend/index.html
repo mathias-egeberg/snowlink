@@ -390,10 +390,36 @@
         <div class="settings-row">
           <div class="settings-row-info">
             <span class="settings-row-title">Data Counter</span>
-            <span class="settings-row-desc">Local counter since last reset</span>
+            <span id="cellular-reset-time" class="settings-row-desc">Last reset: Never</span>
           </div>
           <button id="btn-reset-cellular-usage" class="pill-btn warning"
                   onclick="Settings.resetCellularUsage()">Reset</button>
+        </div>
+
+        <div class="settings-divider"></div>
+
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-title">Speed Test</span>
+            <span id="cellular-speed-status" class="settings-row-desc cellular-status">Never run</span>
+          </div>
+          <button id="btn-cellular-speed-test" class="pill-btn inactive" disabled
+                  onclick="Settings.runCellularSpeedTest()">Test</button>
+        </div>
+
+        <div class="cellular-usage-grid cellular-speed-grid">
+          <div class="cellular-usage-item">
+            <span class="cellular-usage-label">Download</span>
+            <span id="cellular-speed-download" class="cellular-usage-value">0.0 Mbps</span>
+          </div>
+          <div class="cellular-usage-item">
+            <span class="cellular-usage-label">Upload</span>
+            <span id="cellular-speed-upload" class="cellular-usage-value">0.0 Mbps</span>
+          </div>
+          <div class="cellular-usage-item">
+            <span class="cellular-usage-label">Latency</span>
+            <span id="cellular-speed-latency" class="cellular-usage-value">0 ms</span>
+          </div>
         </div>
 
       </div><!-- /cellular card -->
