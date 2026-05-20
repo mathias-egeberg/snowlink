@@ -40,18 +40,7 @@ let _showSnowcat = true;
 let _modelLat   = DEFAULT_LAT;
 let _modelLon   = DEFAULT_LON;
 let _modelBearing = 0.0;
-let _lastBearing  = null;
-let _lastBearingTime = 0;
 let _prevImuReady = false;
-let _lastCenterLat = DEFAULT_LAT;
-let _lastCenterLon = DEFAULT_LON;
-const HEADING_MIN_INTERVAL = 100;  // ms
-const HEADING_MIN_DELTA    = 0.5;  // degrees
-
-// ── Shortest angular delta ─────────────────────────────────────────────────
-function shortestDelta(a, b) {
-  return Math.abs(((a - b + 180) % 360) - 180);
-}
 
 // ── Mercator transform helpers ─────────────────────────────────────────────
 function mercatorTransform(lat, lon, bearingDeg) {
@@ -144,7 +133,7 @@ const snowcatLayer = {
     this.renderer.resetState();
     this.renderer.render(this.scene, this.camera);
     // triggerRepaint() removed from here — the model is static between GPS
-    // updates; re-render is triggered by moveMarker() and setMarkerStyle().
+    // updates; re-render is triggered by _onState() and setMarkerStyle().
   },
 };
 
@@ -155,18 +144,6 @@ function setMarkerStyle(style) {
     _dotMarker.getElement().style.display = (style === 'dot') ? '' : 'none';
   }
   if (_map) _map.triggerRepaint();
-}
-
-// ── Move marker + camera ───────────────────────────────────────────────────
-function moveMarker(lat, lon, bearing) {
-  _modelLat     = lat;
-  _modelLon     = lon;
-  _modelBearing = bearing;
-  if (_dotMarker) _dotMarker.setLngLat([lon, lat]);
-  if (_map) {
-    _map.easeTo({ center: [lon, lat], bearing, duration: 120 });
-    _map.triggerRepaint();
-  }
 }
 
 // ── Basemap toggle ─────────────────────────────────────────────────────────
@@ -304,71 +281,33 @@ function _imuBearing(s) {
 function _onState(s) {
   if (!_map) return;
 
-  // Marker style (controlled via settings).
-  const style = s.marker_style ?? 'snowcat';
-  setMarkerStyle(style);
+  setMarkerStyle(s.marker_style ?? 'snowcat');
 
-  // Update GPS badge on the map header.
-  const gpsTxt = document.getElementById('map-gps-text');
-  if (gpsTxt) {
-    gpsTxt.textContent = s.gps_status_text ?? 'No Fix';
-    const cls = s.gps_ok ? 'ok' : (s.gps_float_rtk ? 'warning' : 'danger');
-    gpsTxt.className = `badge-value ${cls}`;
-  }
-  _setConn('ind-map-5g',  s.cellular_ok);
-  _setConn('ind-map-gps', s.gps_ok, s.gps_float_rtk);
-  _setConn('ind-map-imu', s.imu_ok);
-
+  // Sync GPS position and dot marker every tick.
   const lat = (s.gps_ok || s.gps_float_rtk) ? (s.gps_lat ?? DEFAULT_LAT) : DEFAULT_LAT;
   const lon = (s.gps_ok || s.gps_float_rtk) ? (s.gps_lon ?? DEFAULT_LON) : DEFAULT_LON;
-
-  // Always keep model position and dot marker in sync with GPS.
   _modelLat = lat;
   _modelLon = lon;
   if (_dotMarker) _dotMarker.setLngLat([lon, lat]);
 
-  // When IMU goes offline, reset bearing tracking so reconnect immediately
-  // snaps the map to the new heading instead of waiting for a large delta.
+  // Bearing: update every tick — no delta-gate.
+  // The 0.5° gate in the old code silently dropped all updates when the
+  // snowcat rotated slower than 2.5°/s (delta < 0.5° per 200 ms WS tick).
+  const bearing  = _imuBearing(s);
   const imuReady = s.imu_ok && s.imu_yaw_valid;
-  if (!imuReady && _prevImuReady) _lastBearing = null;
+
+  // Log connect/disconnect so the user can verify detection in the browser
+  // console (F12 → Console) while debugging.
+  if (imuReady !== _prevImuReady) {
+    console.info('[SnowLink] IMU', imuReady ? 'connected' : 'disconnected',
+      '— heading', bearing.toFixed(1) + '°');
+  }
   _prevImuReady = imuReady;
 
-  // Bearing / heading update (throttled).
-  const bearing  = _imuBearing(s);
-  const now      = Date.now();
-  const forcible = _lastBearing === null;
-
-  const posChanged = lat !== _lastCenterLat || lon !== _lastCenterLon;
-
-  if (!forcible) {
-    if (now - _lastBearingTime < HEADING_MIN_INTERVAL) {
-      if (posChanged) _map.easeTo({ center: [lon, lat], duration: 120 });
-      else _map.triggerRepaint();
-      _lastCenterLat = lat; _lastCenterLon = lon;
-      return;
-    }
-    if (shortestDelta(bearing, _lastBearing) < HEADING_MIN_DELTA) {
-      if (posChanged) _map.easeTo({ center: [lon, lat], duration: 120 });
-      else _map.triggerRepaint();
-      _lastCenterLat = lat; _lastCenterLon = lon;
-      return;
-    }
-  }
-
   _modelBearing = bearing;
-  _map.easeTo({ center: [lon, lat], bearing, duration: 120 });
+  _map.setBearing(bearing);
+  _map.setCenter([lon, lat]);
   _map.triggerRepaint();
-  _lastBearing     = bearing;
-  _lastBearingTime = now;
-  _lastCenterLat   = lat;
-  _lastCenterLon   = lon;
-}
-
-function _setConn(id, ok, warn = false) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.classList.toggle('ok',      ok && !warn);
-  el.classList.toggle('warning', !ok && warn);
 }
 
 // ── Map clock ──────────────────────────────────────────────────────────────
