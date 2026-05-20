@@ -9,6 +9,7 @@ REST / WebSocket broadcast.
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import asdict, dataclass, field
 from typing import Optional
 
@@ -86,7 +87,9 @@ class StateManager:
 
     def get_snapshot(self) -> dict:
         with self._lock:
-            return asdict(self._state)
+            snapshot = asdict(self._state)
+            snapshot["snapshot_generated_at_ms"] = int(time.time() * 1000)
+        return snapshot
 
     # ── Write ─────────────────────────────────────────────────────────────
 

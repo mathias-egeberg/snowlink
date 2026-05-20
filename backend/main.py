@@ -7,7 +7,7 @@ Serves the frontend SPA and exposes:
   GET  /api/settings    → persisted settings
   POST /api/settings    → update settings
   POST /api/control/device → toggle a device
-  WS   /ws/state        → live state broadcast at ~5 Hz
+    WS   /ws/state        → live state broadcast at ~20 Hz
 """
 from __future__ import annotations
 
@@ -37,20 +37,26 @@ ASSETS_DIR = _ROOT / "assets"
 # ── WebSocket connection registry ─────────────────────────────────────────────
 
 _ws_clients: set[WebSocket] = set()
+BROADCAST_INTERVAL_SECONDS = 0.05
 
 
 async def _broadcast_loop() -> None:
-    """Send a full state snapshot to every connected WebSocket at ~5 Hz."""
+    """Send a full state snapshot to every connected WebSocket at ~20 Hz."""
     while True:
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(BROADCAST_INTERVAL_SECONDS)
         if not _ws_clients:
             continue
-        msg = json.dumps(state_manager.get_snapshot())
+        try:
+            msg = json.dumps(state_manager.get_snapshot())
+        except Exception:
+            log.exception("WebSocket state snapshot failed")
+            continue
         dead: set[WebSocket] = set()
         for ws in list(_ws_clients):
             try:
                 await ws.send_text(msg)
             except Exception:
+                log.debug("WebSocket state send failed", exc_info=True)
                 dead.add(ws)
         _ws_clients -= dead
 

@@ -1,22 +1,26 @@
 """
-GPS service for u-blox ZED-F9P RTK module (no Kivy dependency).
+GPS service – u-blox ZED-F9P RTK module.
 
-Identifies the module by USB VID/PID so it works regardless of which
-/dev/ttyACMx or COMx port the OS assigns.  Reads NMEA GGA sentences in a
-background thread and updates the DataService GPS state.
-
-On Windows without hardware the service starts but immediately reports
-"Disconnected" (no crash).
+Same two-path detection as ImuService:
+  - Reader thread (fast): calls set_gps(disconnected) the moment readline
+    raises an error.
+  - Main loop (3 s guarantee): scans USB via gps_selftest and force-closes
+    the port if the device has left the bus.
 """
 from __future__ import annotations
 
+import logging
 import threading
 import time
 
-_GPS_VID = 0x1546   # U-Blox AG
-_GPS_PID = 0x01A9   # ZED-F9P
+from backend.services.selftest import gps_selftest
 
-# fix_quality → (gps_ok, gps_float_rtk, status_text)
+log = logging.getLogger("snowlink.gps")
+
+SELFTEST_INTERVAL = 3.0
+
+_BAUDRATE = 9600
+
 _FIX_TABLE: dict[int, tuple[bool, bool, str]] = {
     0: (False, False, "No Fix"),
     1: (False, True,  "GPS Fix"),
@@ -28,61 +32,63 @@ _FIX_TABLE: dict[int, tuple[bool, bool, str]] = {
 }
 
 
-def _find_gps_port() -> str | None:
-    try:
-        from serial.tools import list_ports
-        for p in list_ports.comports():
-            if p.vid == _GPS_VID and p.pid == _GPS_PID:
-                return p.device
-    except Exception:
-        pass
-    return None
-
-
 class GpsService:
-    """Polls USB for ZED-F9P, reads NMEA in background, updates DataService."""
-
-    POLL_INTERVAL = 3.0
 
     def __init__(self, data_service) -> None:
-        self._ds = data_service
-        self._lock = threading.Lock()
+        self._ds     = data_service
+        self._lock   = threading.Lock()
         self._serial = None
         self._active = True
-        self._thread = threading.Thread(target=self._poll_loop, daemon=True)
-        self._thread.start()
+        threading.Thread(target=self._loop, daemon=True, name="gps-loop").start()
 
-    # ── Connection management ─────────────────────────────────────────────
+    # ── Main loop ─────────────────────────────────────────────────────────
 
-    def _poll_loop(self) -> None:
+    def _loop(self) -> None:
         while self._active:
-            with self._lock:
-                already_open = self._serial is not None and self._serial.is_open
-            if already_open:
-                time.sleep(self.POLL_INTERVAL)
-                continue
+            try:
+                self._tick()
+            except Exception:
+                log.exception("GPS loop tick failed")
+            time.sleep(SELFTEST_INTERVAL)
 
-            port = _find_gps_port()
-            if port:
-                self._connect(port)
-            else:
-                self._ds.set_gps(False, False, "Disconnected")
-            time.sleep(self.POLL_INTERVAL)
+    def _tick(self) -> None:
+        port = gps_selftest.find_port()
+
+        with self._lock:
+            ser     = self._serial
+            is_open = ser is not None and ser.is_open
+
+        if port is None:
+            if is_open:
+                try:
+                    ser.close()
+                except Exception:
+                    pass
+            self._ds.set_gps(False, False, "Disconnected")
+
+        elif not is_open:
+            self._connect(port)
+
+    # ── Serial connection ─────────────────────────────────────────────────
 
     def _connect(self, port: str) -> None:
         try:
             import serial
-            ser = serial.Serial(port, baudrate=9600, timeout=1)
+            ser = serial.Serial(port, baudrate=_BAUDRATE, timeout=1)
         except Exception:
+            log.exception("GPS connect failed on %s", port)
             self._ds.set_gps(False, False, "Error")
             return
         with self._lock:
             self._serial = ser
-        threading.Thread(target=self._read_loop, args=(ser,), daemon=True).start()
+        log.debug("GPS connected on %s", port)
+        threading.Thread(
+            target=self._reader, args=(ser,), daemon=True, name="gps-reader"
+        ).start()
 
-    # ── NMEA reading ──────────────────────────────────────────────────────
+    # ── Reader thread ─────────────────────────────────────────────────────
 
-    def _read_loop(self, ser) -> None:
+    def _reader(self, ser) -> None:
         try:
             while self._active and ser.is_open:
                 try:
@@ -93,7 +99,6 @@ class GpsService:
                     line = raw.decode("ascii", errors="ignore").strip()
                 except Exception:
                     continue
-                # Match any talker's GGA sentence ($GNGGA, $GPGGA, etc.)
                 if len(line) > 6 and line[3:6] == "GGA":
                     self._parse_gga(line)
         finally:
@@ -108,7 +113,6 @@ class GpsService:
                 self._ds.set_gps(False, False, "Disconnected")
 
     def _parse_gga(self, sentence: str) -> None:
-        # $xxGGA,time,lat,NS,lon,EW,fix_quality,sats,hdop,alt,M,...
         parts = sentence.split(",")
         if len(parts) < 7 or parts[6] == "":
             return

@@ -27,6 +27,7 @@ class StateManagerTest(unittest.TestCase):
         self.assertIsInstance(snap, dict)
         self.assertIn('temperature_outside', snap)
         self.assertIn('system_status', snap)
+        self.assertIsInstance(snap['snapshot_generated_at_ms'], int)
 
     def test_update_single_field(self):
         self.mgr.update(temperature_outside=5.5)

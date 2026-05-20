@@ -1,7 +1,7 @@
 import unittest
 import struct
 
-from app.services.imu_heading import (
+from backend.services.imu_heading import (
     apply_yaw_calibration,
     extract_ascii_yaws,
     extract_fdfc_yaws,
@@ -85,6 +85,13 @@ class ImuHeadingTests(unittest.TestCase):
         self.assertEqual(len(yaws), 1)
         self.assertAlmostEqual(yaws[0], 270.0, places=4)
         self.assertEqual(remaining, packet[:5])
+
+    def test_extract_fdfc_yaws_preserves_truncated_euler_frame(self):
+        packet = _fdfc_euler_packet(45.0)
+        yaws, remaining = extract_fdfc_yaws(packet[:12])
+
+        self.assertEqual(yaws, ())
+        self.assertEqual(remaining, packet[:12])
 
 
 if __name__ == "__main__":

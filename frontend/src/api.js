@@ -8,6 +8,7 @@ const API = (() => {
   async function _json(method, path, body) {
     const opts = {
       method,
+      cache: 'no-store',
       headers: { 'Content-Type': 'application/json' },
     };
     if (body !== undefined) opts.body = JSON.stringify(body);
