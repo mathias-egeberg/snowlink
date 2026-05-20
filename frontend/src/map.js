@@ -168,7 +168,7 @@ function initMap(initialState) {
 
   const lat = initialState.gps_lat ?? DEFAULT_LAT;
   const lon = initialState.gps_lon ?? DEFAULT_LON;
-  const bearing = _imuBearing(initialState);
+  const bearing = _isImuHeadingReady(initialState) ? _imuBearing(initialState) : 0;
   const style    = initialState.marker_style ?? 'snowcat';
 
   _modelLat     = lat;
@@ -275,7 +275,7 @@ function _injectBasemapToggle() {
 
 // ── IMU heading helper ─────────────────────────────────────────────────────
 function _isImuHeadingReady(s) {
-  if (s.imu_heading_enabled && s.imu_ok && s.imu_yaw_valid) {
+  if (s.imu_heading_enabled && s.imu_ok && s.imu_yaw_valid && s.imu_heading_calibrated) {
     return true;
   }
   return false;

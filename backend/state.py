@@ -59,7 +59,7 @@ class AppState:
 
     # ── Map settings (mirrored from settings.json for WS broadcast) ───────
     marker_style: str = "snowcat"       # 'snowcat' | 'dot'
-    imu_heading_enabled: bool = True
+    imu_heading_enabled: bool = False
 
     # ── LiDAR placeholder ─────────────────────────────────────────────────
     lidar_available: bool = False

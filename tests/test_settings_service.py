@@ -24,7 +24,7 @@ class SettingsServiceTests(unittest.TestCase):
         SettingsService._validate_loaded_data(data)
 
         self.assertEqual(data['map']['marker_style'], 'snowcat')
-        self.assertTrue(data['map']['imu_heading_enabled'])
+        self.assertFalse(data['map']['imu_heading_enabled'])
         self.assertEqual(data['map']['imu_yaw_zero_deg'], 10.5)
         self.assertFalse(data['ntrip']['enabled'])
         self.assertEqual(data['ntrip']['host'], '')

@@ -24,7 +24,7 @@ _DEFAULTS: dict = {
     },
     'map': {
         'marker_style': 'snowcat',        # 'snowcat' | 'dot'
-        'imu_heading_enabled': True,
+        'imu_heading_enabled': False,
         'imu_yaw_zero_deg': None,
     },
 }
