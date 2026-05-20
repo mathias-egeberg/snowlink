@@ -1,11 +1,9 @@
 """
 DataService – coordinates sensor simulation and hardware services.
 
-On Windows (or any platform where serial hardware is absent) the service
-runs in simulation mode: sensor values fluctuate every 5 s.
-
-On Raspberry Pi the GPS and IMU services start as background threads that
-report real hardware values through the same update methods.
+On platforms without hardware the service runs in simulation mode;
+sensor values fluctuate every 5 s.  On Raspberry Pi the GPS, IMU, and
+cellular services run as background threads reporting real state.
 """
 from __future__ import annotations
 
@@ -17,6 +15,11 @@ from typing import Optional
 from backend.state import state_manager
 from backend.services.imu_heading import apply_yaw_calibration, normalize_yaw
 from backend.services.settings_service import SettingsService
+from backend.services.selftest import cellular_selftest
+from backend.services.selftest import imu_selftest
+from backend.services.selftest import gps_selftest
+
+SELFTEST_INTERVAL = 3.0   # seconds between every device check
 
 
 class DataService:
@@ -32,7 +35,6 @@ class DataService:
         self._lock = threading.Lock()
         self._active = True
 
-        # Sync map settings into state so the frontend receives them via WS.
         settings = SettingsService.load()
         state_manager.update(
             marker_style=settings['map']['marker_style'],
@@ -40,31 +42,30 @@ class DataService:
         )
         self.refresh_imu_heading_calibration()
 
-        # Simulated sensor fluctuation runs on all platforms.
         self._sim_thread = threading.Thread(
             target=self._sim_loop, daemon=True, name="sim-loop"
         )
         self._sim_thread.start()
 
-        # Hardware services — fail gracefully when the device is absent.
         from backend.services.imu_service import ImuService
         self._imu_service = ImuService(self)
 
         from backend.services.gps_service import GpsService
         self._gps_service = GpsService(self)
 
-        # Boot selftest: report IMU status after the first scan completes.
+        # Cellular has no persistent connection – checked by a simple poll loop.
         threading.Thread(
-            target=self._imu_boot_check,
-            args=(ImuService.POLL_INTERVAL,),
-            daemon=True,
-            name="imu-boot-check",
+            target=self._cellular_loop, daemon=True, name="cellular-loop"
+        ).start()
+
+        # Report if any device is missing after the first selftest tick.
+        threading.Thread(
+            target=self._boot_report, daemon=True, name="boot-report"
         ).start()
 
     # ── Simulation ────────────────────────────────────────────────────────
 
     def _sim_loop(self) -> None:
-        """Simulate small sensor fluctuations every 5 s."""
         while self._active:
             time.sleep(5)
             s = state_manager.get_snapshot()
@@ -83,7 +84,35 @@ class DataService:
                 ),
             )
 
-    # ── IMU interface (called by ImuService from its thread) ──────────────
+    # ── Cellular loop ─────────────────────────────────────────────────────
+
+    def _cellular_loop(self) -> None:
+        while self._active:
+            ok = cellular_selftest.is_connected()
+            prev = state_manager.get_snapshot()['cellular_ok']
+            if ok != prev:
+                state_manager.update(cellular_ok=ok)
+                state_manager.update(
+                    last_event="Cellular connected" if ok else "Cellular disconnected"
+                )
+            time.sleep(SELFTEST_INTERVAL)
+
+    # ── Boot report ───────────────────────────────────────────────────────
+
+    def _boot_report(self) -> None:
+        """After the first selftest tick, report any missing devices."""
+        time.sleep(SELFTEST_INTERVAL + 1.0)
+        missing = []
+        if not imu_selftest.find_port():
+            missing.append("IMU")
+        if not gps_selftest.find_port():
+            missing.append("GPS")
+        if not cellular_selftest.is_connected():
+            missing.append("Cellular")
+        if missing:
+            state_manager.update(last_event=f"Not found: {', '.join(missing)}")
+
+    # ── IMU interface ─────────────────────────────────────────────────────
 
     def set_imu_yaw(self, yaw_deg: float) -> None:
         normalized = normalize_yaw(yaw_deg)
@@ -105,31 +134,29 @@ class DataService:
     def clear_imu_yaw(self) -> None:
         state_manager.update(imu_yaw_valid=False)
 
-    def _imu_boot_check(self, poll_interval: float) -> None:
-        """After the first IMU scan completes, report status if IMU is absent."""
-        time.sleep(poll_interval + 1.0)
-        if not state_manager.get_snapshot()['imu_ok']:
-            state_manager.update(last_event="IMU not found – check USB connection")
-
     def set_imu_connection(self, connected: bool) -> None:
         prev_ok = state_manager.get_snapshot()['imu_ok']
         state_manager.update(imu_ok=connected)
         if not connected:
             self.clear_imu_yaw()
-        # Post a dashboard event only on a real transition to avoid noise.
         if connected and not prev_ok:
             state_manager.update(last_event="IMU connected")
         elif not connected and prev_ok:
             state_manager.update(last_event="IMU disconnected")
 
-    # ── GPS interface (called by GpsService from its thread) ──────────────
+    # ── GPS interface ─────────────────────────────────────────────────────
 
     def set_gps(self, ok: bool, float_rtk: bool, status_text: str) -> None:
+        prev_ok = state_manager.get_snapshot()['gps_ok']
         state_manager.update(
             gps_ok=ok,
             gps_float_rtk=float_rtk,
             gps_status_text=status_text,
         )
+        if ok and not prev_ok:
+            state_manager.update(last_event="GPS connected")
+        elif not ok and prev_ok:
+            state_manager.update(last_event="GPS disconnected")
 
     # ── IMU calibration ───────────────────────────────────────────────────
 
