@@ -12,7 +12,11 @@ from __future__ import annotations
 
 import socket
 import struct
-import fcntl
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 _CELLULAR_IFACES = ("wwan0", "usb0", "ppp0", "rmnet0", "wwan1", "usb1")
 
@@ -21,6 +25,8 @@ _SIOCGIFADDR = 0x8915
 
 
 def _iface_has_ip(name: str) -> bool:
+    if fcntl is None:
+        return False
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:

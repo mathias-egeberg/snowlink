@@ -25,7 +25,7 @@ from backend.services.selftest import imu_selftest
 
 log = logging.getLogger("snowlink.imu")
 
-SELFTEST_INTERVAL = 1.0
+SELFTEST_INTERVAL = 3.0
 
 _BAUDRATES     = (921600, 115200, 9600)
 _READ_SIZE     = 1024

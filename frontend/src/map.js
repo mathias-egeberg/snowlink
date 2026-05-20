@@ -42,6 +42,10 @@ let _modelLon   = DEFAULT_LON;
 let _modelBearing = 0.0;
 let _prevImuReady = false;
 
+function shortestBearingDelta(firstDeg, secondDeg) {
+  return Math.abs((firstDeg - secondDeg + 540) % 360 - 180);
+}
+
 // ── Mercator transform helpers ─────────────────────────────────────────────
 function mercatorTransform(lat, lon, bearingDeg) {
   const coord = maplibregl.MercatorCoordinate.fromLngLat([lon, lat], 0);
@@ -270,11 +274,15 @@ function _injectBasemapToggle() {
 }
 
 // ── IMU heading helper ─────────────────────────────────────────────────────
-function _imuBearing(s) {
+function _isImuHeadingReady(s) {
   if (s.imu_heading_enabled && s.imu_ok && s.imu_yaw_valid) {
-    return s.imu_heading_deg ?? 0;
+    return true;
   }
-  return 0;
+  return false;
+}
+
+function _imuBearing(s) {
+  return s.imu_heading_deg ?? 0;
 }
 
 // ── WebSocket state handler ────────────────────────────────────────────────
@@ -286,28 +294,44 @@ function _onState(s) {
   // Sync GPS position and dot marker every tick.
   const lat = (s.gps_ok || s.gps_float_rtk) ? (s.gps_lat ?? DEFAULT_LAT) : DEFAULT_LAT;
   const lon = (s.gps_ok || s.gps_float_rtk) ? (s.gps_lon ?? DEFAULT_LON) : DEFAULT_LON;
-  _modelLat = lat;
-  _modelLon = lon;
-  if (_dotMarker) _dotMarker.setLngLat([lon, lat]);
+  const positionChanged = lat !== _modelLat || lon !== _modelLon;
+  if (positionChanged) {
+    _modelLat = lat;
+    _modelLon = lon;
+    if (_dotMarker) _dotMarker.setLngLat([lon, lat]);
+  }
 
-  // Bearing: update every tick — no delta-gate.
-  // The 0.5° gate in the old code silently dropped all updates when the
-  // snowcat rotated slower than 2.5°/s (delta < 0.5° per 200 ms WS tick).
-  const bearing  = _imuBearing(s);
-  const imuReady = s.imu_ok && s.imu_yaw_valid;
+  // Process bearing every WebSocket tick so slow rotation is not dropped.
+  // Rendering still uses small delta gates to avoid unnecessary repaints.
+  const imuReady = _isImuHeadingReady(s);
+  const bearing = imuReady ? _imuBearing(s) : 0;
+  const imuReadyChanged = imuReady !== _prevImuReady;
 
   // Log connect/disconnect so the user can verify detection in the browser
   // console (F12 → Console) while debugging.
-  if (imuReady !== _prevImuReady) {
+  if (imuReadyChanged) {
     console.info('[SnowLink] IMU', imuReady ? 'connected' : 'disconnected',
       '— heading', bearing.toFixed(1) + '°');
   }
-  _prevImuReady = imuReady;
 
-  _modelBearing = bearing;
-  _map.setBearing(bearing);
-  _map.setCenter([lon, lat]);
-  _map.triggerRepaint();
+  const modelBearingChanged =
+    shortestBearingDelta(_modelBearing, bearing) > 0.1 || imuReadyChanged;
+  if (modelBearingChanged) {
+    _modelBearing = bearing;
+  }
+
+  const cameraBearingChanged =
+    (imuReady || imuReadyChanged) && shortestBearingDelta(_map.getBearing(), bearing) > 0.1;
+  if (cameraBearingChanged) {
+    _map.setBearing(bearing);
+  }
+  if (positionChanged) {
+    _map.setCenter([lon, lat]);
+  }
+  if (positionChanged || modelBearingChanged || cameraBearingChanged) {
+    _map.triggerRepaint();
+  }
+  _prevImuReady = imuReady;
 }
 
 // ── Map clock ──────────────────────────────────────────────────────────────

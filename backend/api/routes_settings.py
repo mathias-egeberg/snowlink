@@ -44,12 +44,13 @@ async def post_settings(payload: dict = Body(...)) -> dict:
             m["imu_heading_enabled"] = new_imu
 
         # imu_yaw_zero_deg is only written by the calibration endpoint,
-        # but allow it here too for completeness.
-        zero = map_in.get("imu_yaw_zero_deg")
-        if zero is None:
-            m["imu_yaw_zero_deg"] = None
-        elif isinstance(zero, (int, float)):
-            m["imu_yaw_zero_deg"] = float(zero) % 360.0
+        # but allow explicit updates here too for completeness.
+        if "imu_yaw_zero_deg" in map_in:
+            zero = map_in["imu_yaw_zero_deg"]
+            if zero is None:
+                m["imu_yaw_zero_deg"] = None
+            elif isinstance(zero, (int, float)):
+                m["imu_yaw_zero_deg"] = float(zero) % 360.0
 
     SettingsService._validate_loaded_data(data)
     SettingsService.save()
