@@ -148,6 +148,65 @@ const Settings = (() => {
     }
   }
 
+  // ── Cellular data counter ─────────────────────────────────────────
+  function _formatBytes(value) {
+    const bytes = Number(value);
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = bytes;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+    const decimals = unitIndex === 0 || size >= 100 ? 0 : 1;
+    return `${size.toFixed(decimals)} ${units[unitIndex]}`;
+  }
+
+  function _renderCellular(s) {
+    const status = document.getElementById('cellular-status');
+    const detail = document.getElementById('cellular-detail');
+    const rx = document.getElementById('cellular-rx');
+    const tx = document.getElementById('cellular-tx');
+    const total = document.getElementById('cellular-total');
+
+    if (status) {
+      status.textContent = s.cellular_status_text ?? 'No modem';
+      status.className = `settings-row-desc cellular-status ${
+        s.cellular_ok ? 'ok' : (s.cellular_detected ? 'warning' : 'danger')
+      }`;
+    }
+    if (detail) {
+      const product = s.cellular_product || (s.cellular_is_huawei ? 'Huawei modem' : 'Cellular modem');
+      const iface = s.cellular_iface ? `${s.cellular_iface}` : 'No interface';
+      const ip = s.cellular_ipv4 ? ` · ${s.cellular_ipv4}` : '';
+      detail.textContent = s.cellular_detected ? `${product} · ${iface}${ip}` : 'Waiting for USB dongle';
+    }
+    if (rx) rx.textContent = _formatBytes(s.cellular_bytes_received);
+    if (tx) tx.textContent = _formatBytes(s.cellular_bytes_sent);
+    if (total) total.textContent = _formatBytes(s.cellular_bytes_total);
+  }
+
+  async function resetCellularUsage() {
+    const btn = document.getElementById('btn-reset-cellular-usage');
+    if (btn) { btn.textContent = 'Resetting…'; btn.disabled = true; }
+    try {
+      const result = await API.resetCellularUsage();
+      if (result.state) AppState.update(result.state);
+      if (btn) btn.textContent = 'Reset';
+    } catch (e) {
+      console.error('[Settings] resetCellularUsage error', e);
+      if (btn) btn.textContent = 'Error';
+    } finally {
+      setTimeout(() => {
+        if (btn) {
+          btn.textContent = 'Reset';
+          btn.disabled = false;
+        }
+      }, 1200);
+    }
+  }
+
   // ── Connection indicator helper ────────────────────────────────────
   function _setConn(id, ok, warn = false) {
     const el = document.getElementById(id);
@@ -170,6 +229,8 @@ const Settings = (() => {
     _setConn('ind-set-5g',  s.cellular_ok);
     _setConn('ind-set-gps', s.gps_ok, s.gps_float_rtk);
     _setConn('ind-set-imu', s.imu_ok);
+
+    _renderCellular(s);
 
     // IMU calibration row
     const status = document.getElementById('imu-heading-status');
@@ -227,5 +288,6 @@ const Settings = (() => {
     toggleMarkerStyle,
     toggleImuHeading,
     calibrateImu,
+    resetCellularUsage,
   };
 })();

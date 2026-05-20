@@ -1,4 +1,8 @@
 from fastapi import APIRouter, Body, HTTPException
+from backend.services.cellular_usage_service import (
+    CellularUsagePersistenceError,
+    CellularUsageService,
+)
 from backend.services.settings_service import SettingsService, VALID_MARKER_STYLES
 from backend.state import state_manager
 
@@ -74,4 +78,24 @@ async def calibrate_imu() -> dict:
             status_code=409,
             detail="IMU yaw not available — ensure IMU is connected and sending data.",
         )
+    return {"ok": True, "state": state_manager.get_snapshot()}
+
+
+@router.post("/settings/cellular-usage/reset")
+async def reset_cellular_usage() -> dict:
+    """Reset the local cellular data counter and keep current counters as baseline."""
+    try:
+        snapshot = state_manager.get_snapshot()
+        iface = snapshot.get('cellular_iface') or None
+        usage = CellularUsageService.reset(iface)
+    except CellularUsagePersistenceError as exc:
+        raise HTTPException(status_code=500, detail="Unable to reset cellular usage counter") from exc
+    state_manager.update(
+        cellular_bytes_received=usage['bytes_received'],
+        cellular_bytes_sent=usage['bytes_sent'],
+        cellular_bytes_total=usage['bytes_total'],
+        cellular_usage_reset_at_ms=usage['reset_at_ms'],
+        cellular_usage_updated_at_ms=usage['updated_at_ms'],
+        last_event="Cellular data counter reset",
+    )
     return {"ok": True, "state": state_manager.get_snapshot()}

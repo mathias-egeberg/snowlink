@@ -14,6 +14,8 @@ class BackendStateRoutesTest(unittest.TestCase):
 
         self.assertEqual(response.headers['Cache-Control'], 'no-store')
         self.assertIn('imu_yaw_deg', snapshot)
+        self.assertIn('cellular_status_text', snapshot)
+        self.assertIn('cellular_bytes_total', snapshot)
 
 
 if __name__ == '__main__':

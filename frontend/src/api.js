@@ -26,5 +26,6 @@ const API = (() => {
     postSettings:(payload) => _json('POST', '/api/settings', payload),
     toggleDevice:(key)    => _json('POST', '/api/control/device', { device_key: key }),
     calibrateImu:()       => _json('POST', '/api/settings/calibrate-imu'),
+    resetCellularUsage:() => _json('POST', '/api/settings/cellular-usage/reset'),
   };
 })();
