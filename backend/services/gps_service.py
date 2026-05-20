@@ -1,25 +1,26 @@
 """
-GPS service – reads NMEA GGA from u-blox ZED-F9P and updates DataService.
+GPS service – u-blox ZED-F9P RTK module.
 
-The main loop runs every 3 seconds and is the sole authority for
-connection state.  It calls gps_selftest.find_port() on every tick:
-
-  - device gone  → close serial port, mark disconnected
-  - device present, not connected → open serial port, start reader thread
-  - device present, connected → nothing (reader thread handles data)
+Same two-path detection as ImuService:
+  - Reader thread (fast): calls set_gps(disconnected) the moment readline
+    raises an error.
+  - Main loop (3 s guarantee): scans USB via gps_selftest and force-closes
+    the port if the device has left the bus.
 """
 from __future__ import annotations
 
+import logging
 import threading
 import time
 
 from backend.services.selftest import gps_selftest
 
-SELFTEST_INTERVAL = 3.0   # seconds between USB presence checks
+log = logging.getLogger("snowlink.gps")
+
+SELFTEST_INTERVAL = 3.0
 
 _BAUDRATE = 9600
 
-# GGA fix_quality → (gps_ok, float_rtk, status_text)
 _FIX_TABLE: dict[int, tuple[bool, bool, str]] = {
     0: (False, False, "No Fix"),
     1: (False, True,  "GPS Fix"),
@@ -32,40 +33,41 @@ _FIX_TABLE: dict[int, tuple[bool, bool, str]] = {
 
 
 class GpsService:
-    """Manages the GPS serial connection and NMEA data pipeline."""
 
     def __init__(self, data_service) -> None:
-        self._ds = data_service
-        self._lock = threading.Lock()
+        self._ds     = data_service
+        self._lock   = threading.Lock()
         self._serial = None
         self._active = True
-        self._thread = threading.Thread(target=self._loop, daemon=True, name="gps-loop")
-        self._thread.start()
+        threading.Thread(target=self._loop, daemon=True, name="gps-loop").start()
 
-    # ── Main loop (runs every 3 s) ────────────────────────────────────────
+    # ── Main loop ─────────────────────────────────────────────────────────
 
     def _loop(self) -> None:
         while self._active:
-            port = gps_selftest.find_port()
-
-            with self._lock:
-                ser = self._serial
-                is_open = ser is not None and ser.is_open
-
-            if port is None:
-                # Device not present – close any open connection immediately.
-                if is_open:
-                    try:
-                        ser.close()
-                    except Exception:
-                        pass
-                self._ds.set_gps(False, False, "Disconnected")
-
-            elif not is_open:
-                # Device present but not connected – open the serial port.
-                self._connect(port)
-
+            try:
+                self._tick()
+            except Exception:
+                log.exception("GPS loop tick failed")
             time.sleep(SELFTEST_INTERVAL)
+
+    def _tick(self) -> None:
+        port = gps_selftest.find_port()
+
+        with self._lock:
+            ser     = self._serial
+            is_open = ser is not None and ser.is_open
+
+        if port is None:
+            if is_open:
+                try:
+                    ser.close()
+                except Exception:
+                    pass
+            self._ds.set_gps(False, False, "Disconnected")
+
+        elif not is_open:
+            self._connect(port)
 
     # ── Serial connection ─────────────────────────────────────────────────
 
@@ -74,10 +76,12 @@ class GpsService:
             import serial
             ser = serial.Serial(port, baudrate=_BAUDRATE, timeout=1)
         except Exception:
+            log.exception("GPS connect failed on %s", port)
             self._ds.set_gps(False, False, "Error")
             return
         with self._lock:
             self._serial = ser
+        log.debug("GPS connected on %s", port)
         threading.Thread(
             target=self._reader, args=(ser,), daemon=True, name="gps-reader"
         ).start()
@@ -85,7 +89,6 @@ class GpsService:
     # ── Reader thread ─────────────────────────────────────────────────────
 
     def _reader(self, ser) -> None:
-        """Parse NMEA GGA lines; exit silently on any error."""
         try:
             while self._active and ser.is_open:
                 try:
@@ -106,9 +109,10 @@ class GpsService:
             with self._lock:
                 if self._serial is ser:
                     self._serial = None
+            if self._active:
+                self._ds.set_gps(False, False, "Disconnected")
 
     def _parse_gga(self, sentence: str) -> None:
-        # $xxGGA,time,lat,NS,lon,EW,fix_quality,sats,hdop,alt,M,...
         parts = sentence.split(",")
         if len(parts) < 7 or parts[6] == "":
             return

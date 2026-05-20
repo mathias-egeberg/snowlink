@@ -30,7 +30,7 @@ def _iface_has_ip(name: str) -> bool:
             return addr not in ("0.0.0.0", "")
         finally:
             sock.close()
-    except OSError:
+    except Exception:
         return False
 
 

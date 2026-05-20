@@ -7,6 +7,7 @@ cellular services run as background threads reporting real state.
 """
 from __future__ import annotations
 
+import logging
 import random
 import threading
 import time
@@ -15,11 +16,10 @@ from typing import Optional
 from backend.state import state_manager
 from backend.services.imu_heading import apply_yaw_calibration, normalize_yaw
 from backend.services.settings_service import SettingsService
-from backend.services.selftest import cellular_selftest
-from backend.services.selftest import imu_selftest
-from backend.services.selftest import gps_selftest
 
-SELFTEST_INTERVAL = 3.0   # seconds between every device check
+log = logging.getLogger("snowlink.data")
+
+SELFTEST_INTERVAL = 3.0
 
 
 class DataService:
@@ -32,7 +32,7 @@ class DataService:
         return cls._instance
 
     def __init__(self) -> None:
-        self._lock = threading.Lock()
+        self._lock   = threading.Lock()
         self._active = True
 
         settings = SettingsService.load()
@@ -42,10 +42,7 @@ class DataService:
         )
         self.refresh_imu_heading_calibration()
 
-        self._sim_thread = threading.Thread(
-            target=self._sim_loop, daemon=True, name="sim-loop"
-        )
-        self._sim_thread.start()
+        threading.Thread(target=self._sim_loop, daemon=True, name="sim-loop").start()
 
         from backend.services.imu_service import ImuService
         self._imu_service = ImuService(self)
@@ -53,15 +50,8 @@ class DataService:
         from backend.services.gps_service import GpsService
         self._gps_service = GpsService(self)
 
-        # Cellular has no persistent connection – checked by a simple poll loop.
-        threading.Thread(
-            target=self._cellular_loop, daemon=True, name="cellular-loop"
-        ).start()
-
-        # Report if any device is missing after the first selftest tick.
-        threading.Thread(
-            target=self._boot_report, daemon=True, name="boot-report"
-        ).start()
+        threading.Thread(target=self._cellular_loop, daemon=True, name="cellular-loop").start()
+        threading.Thread(target=self._boot_report,   daemon=True, name="boot-report").start()
 
     # ── Simulation ────────────────────────────────────────────────────────
 
@@ -70,59 +60,58 @@ class DataService:
             time.sleep(5)
             s = state_manager.get_snapshot()
             state_manager.update(
-                temperature_outside=round(
-                    s['temperature_outside'] + random.uniform(-0.3, 0.3), 1
-                ),
-                temperature_roof=round(
-                    s['temperature_roof'] + random.uniform(-0.2, 0.2), 1
-                ),
-                snow_depth_cm=round(
-                    max(0.0, s['snow_depth_cm'] + random.uniform(-0.5, 0.5)), 1
-                ),
-                wind_speed_ms=round(
-                    max(0.0, s['wind_speed_ms'] + random.uniform(-0.5, 0.5)), 1
-                ),
+                temperature_outside=round(s['temperature_outside'] + random.uniform(-0.3, 0.3), 1),
+                temperature_roof=round(s['temperature_roof']    + random.uniform(-0.2, 0.2), 1),
+                snow_depth_cm=round(max(0.0, s['snow_depth_cm'] + random.uniform(-0.5, 0.5)), 1),
+                wind_speed_ms=round(max(0.0, s['wind_speed_ms'] + random.uniform(-0.5, 0.5)), 1),
             )
 
     # ── Cellular loop ─────────────────────────────────────────────────────
 
     def _cellular_loop(self) -> None:
         while self._active:
-            ok = cellular_selftest.is_connected()
-            prev = state_manager.get_snapshot()['cellular_ok']
-            if ok != prev:
-                state_manager.update(cellular_ok=ok)
-                state_manager.update(
-                    last_event="Cellular connected" if ok else "Cellular disconnected"
-                )
+            try:
+                from backend.services.selftest import cellular_selftest
+                ok   = cellular_selftest.is_connected()
+                prev = state_manager.get_snapshot()['cellular_ok']
+                if ok != prev:
+                    state_manager.update(cellular_ok=ok)
+                    state_manager.update(
+                        last_event="Cellular connected" if ok else "Cellular disconnected"
+                    )
+            except Exception:
+                log.exception("Cellular selftest error")
             time.sleep(SELFTEST_INTERVAL)
 
     # ── Boot report ───────────────────────────────────────────────────────
 
     def _boot_report(self) -> None:
-        """After the first selftest tick, report any missing devices."""
         time.sleep(SELFTEST_INTERVAL + 1.0)
-        missing = []
-        if not imu_selftest.find_port():
-            missing.append("IMU")
-        if not gps_selftest.find_port():
-            missing.append("GPS")
-        if not cellular_selftest.is_connected():
-            missing.append("Cellular")
-        if missing:
-            state_manager.update(last_event=f"Not found: {', '.join(missing)}")
+        try:
+            from backend.services.selftest import imu_selftest, gps_selftest, cellular_selftest
+            missing = []
+            if not imu_selftest.find_port():
+                missing.append("IMU")
+            if not gps_selftest.find_port():
+                missing.append("GPS")
+            if not cellular_selftest.is_connected():
+                missing.append("Cellular")
+            if missing:
+                state_manager.update(last_event=f"Not found: {', '.join(missing)}")
+        except Exception:
+            log.exception("Boot report error")
 
     # ── IMU interface ─────────────────────────────────────────────────────
 
     def set_imu_yaw(self, yaw_deg: float) -> None:
         normalized = normalize_yaw(yaw_deg)
-        settings = SettingsService.load()
-        zero = settings['map'].get('imu_yaw_zero_deg')
+        settings   = SettingsService.load()
+        zero       = settings['map'].get('imu_yaw_zero_deg')
         calibrated = zero is not None
         try:
             heading = apply_yaw_calibration(normalized, float(zero)) if calibrated else normalized
         except (TypeError, ValueError):
-            heading = normalized
+            heading    = normalized
             calibrated = False
         state_manager.update(
             imu_yaw_deg=normalized,
@@ -172,9 +161,9 @@ class DataService:
         return True
 
     def refresh_imu_heading_calibration(self) -> None:
-        s = state_manager.get_snapshot()
-        settings = SettingsService.load()
-        zero = settings['map'].get('imu_yaw_zero_deg')
+        s          = state_manager.get_snapshot()
+        settings   = SettingsService.load()
+        zero       = settings['map'].get('imu_yaw_zero_deg')
         calibrated = zero is not None
         try:
             heading = (
@@ -182,12 +171,9 @@ class DataService:
                 if calibrated else normalize_yaw(s['imu_yaw_deg'])
             )
         except (TypeError, ValueError):
-            heading = normalize_yaw(s['imu_yaw_deg'])
+            heading    = normalize_yaw(s['imu_yaw_deg'])
             calibrated = False
-        state_manager.update(
-            imu_heading_calibrated=calibrated,
-            imu_heading_deg=heading,
-        )
+        state_manager.update(imu_heading_calibrated=calibrated, imu_heading_deg=heading)
 
     # ── Cleanup ───────────────────────────────────────────────────────────
 
