@@ -32,6 +32,8 @@ const DEFAULT_LON = 11.0196226;
 // Model extents: ~375 mm × 214 mm × 162 mm native units.
 // Real snowcat ≈ 8 m long → world scale = 8000/375 ≈ 21.3
 const MODEL_SCALE_FACTOR = 21.3;
+const HEADING_SMOOTHING_RATE = 18.0;
+const HEADING_EPSILON_DEG = 0.05;
 
 // ── State ─────────────────────────────────────────────────────────────────
 let _map        = null;
@@ -40,10 +42,100 @@ let _showSnowcat = true;
 let _modelLat   = DEFAULT_LAT;
 let _modelLon   = DEFAULT_LON;
 let _modelBearing = 0.0;
+let _targetBearing = 0.0;
+let _displayBearing = 0.0;
+let _lastValidBearing = 0.0;
+let _headingAnimationId = null;
+let _lastHeadingFrameAt = null;
+let _headingCameraControlled = false;
+let _releaseCameraAfterHeadingAnimation = false;
 let _prevImuReady = false;
 
+function normalizeBearing(degrees) {
+  return (degrees % 360 + 360) % 360;
+}
+
+function signedBearingDelta(fromDeg, toDeg) {
+  return ((toDeg - fromDeg + 540) % 360) - 180;
+}
+
 function shortestBearingDelta(firstDeg, secondDeg) {
-  return Math.abs((firstDeg - secondDeg + 540) % 360 - 180);
+  return Math.abs(signedBearingDelta(secondDeg, firstDeg));
+}
+
+function _applyDisplayedBearing(bearing) {
+  _displayBearing = normalizeBearing(bearing);
+  _modelBearing = _displayBearing;
+  if (_headingCameraControlled && _map) {
+    _map.setBearing(_displayBearing);
+  }
+  if (_map) _map.triggerRepaint();
+}
+
+function _finishHeadingAnimation() {
+  if (_headingAnimationId !== null) {
+    cancelAnimationFrame(_headingAnimationId);
+  }
+  if (_releaseCameraAfterHeadingAnimation) {
+    _headingCameraControlled = false;
+    _releaseCameraAfterHeadingAnimation = false;
+  }
+  _headingAnimationId = null;
+  _lastHeadingFrameAt = null;
+}
+
+function _cancelHeadingAnimationForUser() {
+  if (_headingAnimationId !== null) {
+    cancelAnimationFrame(_headingAnimationId);
+  }
+  _headingAnimationId = null;
+  _lastHeadingFrameAt = null;
+  _headingCameraControlled = false;
+  _releaseCameraAfterHeadingAnimation = false;
+}
+
+function _animateHeading(timestamp) {
+  if (!_map) {
+    _finishHeadingAnimation();
+    return;
+  }
+
+  if (_lastHeadingFrameAt === null) {
+    _lastHeadingFrameAt = timestamp;
+    _headingAnimationId = requestAnimationFrame(_animateHeading);
+    return;
+  }
+
+  const delta = signedBearingDelta(_displayBearing, _targetBearing);
+  if (Math.abs(delta) <= HEADING_EPSILON_DEG) {
+    _applyDisplayedBearing(_targetBearing);
+    _finishHeadingAnimation();
+    return;
+  }
+
+  // Cap frame delta so tab focus changes do not create a huge bearing jump.
+  const elapsedSeconds = Math.min((timestamp - _lastHeadingFrameAt) / 1000, 0.1);
+  _lastHeadingFrameAt = timestamp;
+  const step = 1 - Math.exp(-HEADING_SMOOTHING_RATE * elapsedSeconds);
+  _applyDisplayedBearing(_displayBearing + delta * step);
+  _headingAnimationId = requestAnimationFrame(_animateHeading);
+}
+
+function _setHeadingTarget(bearing, controlCamera, releaseCameraWhenDone = false) {
+  _targetBearing = normalizeBearing(bearing);
+  _headingCameraControlled = controlCamera;
+  _releaseCameraAfterHeadingAnimation = releaseCameraWhenDone;
+
+  if (shortestBearingDelta(_displayBearing, _targetBearing) <= HEADING_EPSILON_DEG) {
+    _applyDisplayedBearing(_targetBearing);
+    _finishHeadingAnimation();
+    return;
+  }
+
+  if (_headingAnimationId === null) {
+    _lastHeadingFrameAt = null;
+    _headingAnimationId = requestAnimationFrame(_animateHeading);
+  }
 }
 
 // ── Mercator transform helpers ─────────────────────────────────────────────
@@ -174,6 +266,9 @@ function initMap(initialState) {
   _modelLat     = lat;
   _modelLon     = lon;
   _modelBearing = bearing;
+  _targetBearing = bearing;
+  _displayBearing = bearing;
+  _lastValidBearing = bearing;
 
   _map = new maplibregl.Map({
     container: 'map',
@@ -213,6 +308,12 @@ function initMap(initialState) {
     new maplibregl.NavigationControl({ visualizePitch: true }),
     'bottom-right',
   );
+
+  _map.on('rotatestart', (event) => {
+    if (event.originalEvent) {
+      _cancelHeadingAnimationForUser();
+    }
+  });
 
   _map.on('load', () => {
     _map.addLayer(snowcatLayer);
@@ -304,7 +405,10 @@ function _onState(s) {
   // Process bearing every WebSocket tick so slow rotation is not dropped.
   // Rendering still uses small delta gates to avoid unnecessary repaints.
   const imuReady = _isImuHeadingReady(s);
-  const bearing = imuReady ? _imuBearing(s) : 0;
+  const bearing = imuReady ? _imuBearing(s) : _lastValidBearing;
+  if (imuReady) {
+    _lastValidBearing = bearing;
+  }
   const imuReadyChanged = imuReady !== _prevImuReady;
 
   // Log connect/disconnect so the user can verify detection in the browser
@@ -314,21 +418,14 @@ function _onState(s) {
       '— heading', bearing.toFixed(1) + '°');
   }
 
-  const modelBearingChanged =
-    shortestBearingDelta(_modelBearing, bearing) > 0.1 || imuReadyChanged;
-  if (modelBearingChanged) {
-    _modelBearing = bearing;
-  }
-
-  const cameraBearingChanged =
-    (imuReady || imuReadyChanged) && shortestBearingDelta(_map.getBearing(), bearing) > 0.1;
-  if (cameraBearingChanged) {
-    _map.setBearing(bearing);
+  const headingChanged =
+    shortestBearingDelta(_targetBearing, bearing) > HEADING_EPSILON_DEG ||
+    shortestBearingDelta(_displayBearing, bearing) > HEADING_EPSILON_DEG;
+  if (imuReady || imuReadyChanged || headingChanged) {
+    _setHeadingTarget(bearing, imuReady || imuReadyChanged, !imuReady);
   }
   if (positionChanged) {
     _map.setCenter([lon, lat]);
-  }
-  if (positionChanged || modelBearingChanged || cameraBearingChanged) {
     _map.triggerRepaint();
   }
   _prevImuReady = imuReady;
@@ -367,6 +464,7 @@ document.addEventListener('screenchange', (e) => {
     if (s && _map) _onState(s);
   } else {
     _stopClock();
+    _finishHeadingAnimation();
   }
 });
 
