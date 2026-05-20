@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import threading
 import time
+from typing import Optional
 
 from backend.services.imu_heading import (
     extract_ascii_yaws,
@@ -56,6 +57,11 @@ class ImuService:
         self._serial = None
         self._active = True
         self._baud_index = 0
+        # Remembered baud rate from last successful yaw read – tried first on reconnect
+        # so we don't cycle through wrong rates after a brief unplug.
+        self._last_good_baud: Optional[int] = None
+        # Set by _read_loop when it exits so _poll_loop wakes immediately.
+        self._disconnected = threading.Event()
         self._thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._thread.start()
 
@@ -66,7 +72,9 @@ class ImuService:
             with self._lock:
                 already_open = self._serial is not None and self._serial.is_open
             if already_open:
-                time.sleep(self.POLL_INTERVAL)
+                # Wait for the read loop to signal disconnect, or time out.
+                self._disconnected.wait(timeout=self.POLL_INTERVAL)
+                self._disconnected.clear()
                 continue
 
             port = _find_imu_port()
@@ -77,8 +85,12 @@ class ImuService:
             time.sleep(self.POLL_INTERVAL)
 
     def _connect(self, port: str) -> None:
-        baudrate = self.BAUDRATES[self._baud_index]
-        self._baud_index = (self._baud_index + 1) % len(self.BAUDRATES)
+        # Try the last known-good baud rate first; fall back to rotation.
+        if self._last_good_baud is not None:
+            baudrate = self._last_good_baud
+        else:
+            baudrate = self.BAUDRATES[self._baud_index]
+            self._baud_index = (self._baud_index + 1) % len(self.BAUDRATES)
         ser = None
         try:
             import serial
@@ -141,12 +153,17 @@ class ImuService:
                     latest_yaw = ascii_yaws[-1]
 
                 if latest_yaw is not None:
+                    # Remember the baud rate that gave us valid data.
+                    if self._last_good_baud != ser.baudrate:
+                        self._last_good_baud = ser.baudrate
                     last_yaw_at = time.monotonic()
                     yaw_is_stale = False
                     self._ds.set_imu_yaw(latest_yaw)
                 elif yaw_is_stale and (
                     time.monotonic() - connected_at > self.INITIAL_YAW_TIMEOUT
                 ):
+                    # Wrong baud rate or unresponsive device – try next baud.
+                    self._last_good_baud = None
                     break
 
         finally:
@@ -159,6 +176,8 @@ class ImuService:
                     self._serial = None
             if self._active:
                 self._ds.set_imu_connection(False)
+            # Wake the poll loop so it rescans without waiting out the full interval.
+            self._disconnected.set()
 
     # ── Cleanup ───────────────────────────────────────────────────────────
 
@@ -167,3 +186,4 @@ class ImuService:
             self._active = False
             if self._serial and self._serial.is_open:
                 self._serial.close()
+        self._disconnected.set()

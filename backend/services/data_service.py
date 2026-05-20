@@ -53,6 +53,14 @@ class DataService:
         from backend.services.gps_service import GpsService
         self._gps_service = GpsService(self)
 
+        # Boot selftest: report IMU status after the first scan completes.
+        threading.Thread(
+            target=self._imu_boot_check,
+            args=(ImuService.POLL_INTERVAL,),
+            daemon=True,
+            name="imu-boot-check",
+        ).start()
+
     # ── Simulation ────────────────────────────────────────────────────────
 
     def _sim_loop(self) -> None:
@@ -97,10 +105,22 @@ class DataService:
     def clear_imu_yaw(self) -> None:
         state_manager.update(imu_yaw_valid=False)
 
+    def _imu_boot_check(self, poll_interval: float) -> None:
+        """After the first IMU scan completes, report status if IMU is absent."""
+        time.sleep(poll_interval + 1.0)
+        if not state_manager.get_snapshot()['imu_ok']:
+            state_manager.update(last_event="IMU not found – check USB connection")
+
     def set_imu_connection(self, connected: bool) -> None:
+        prev_ok = state_manager.get_snapshot()['imu_ok']
         state_manager.update(imu_ok=connected)
         if not connected:
             self.clear_imu_yaw()
+        # Post a dashboard event only on a real transition to avoid noise.
+        if connected and not prev_ok:
+            state_manager.update(last_event="IMU connected")
+        elif not connected and prev_ok:
+            state_manager.update(last_event="IMU disconnected")
 
     # ── GPS interface (called by GpsService from its thread) ──────────────
 
