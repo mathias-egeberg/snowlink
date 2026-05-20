@@ -45,7 +45,8 @@ def _find_imu_port() -> str | None:
 class ImuService:
     """Reads IMU yaw and keeps DataService IMU properties current."""
 
-    POLL_INTERVAL = 3.0
+    SELFTEST_INTERVAL = 3.0  # seconds between every USB presence check
+    POLL_INTERVAL = SELFTEST_INTERVAL  # alias used by DataService boot check
     BAUDRATES = (921600, 115200, 9600)
     READ_SIZE = 1024
     STALE_YAW_SECONDS = 2.5
@@ -71,10 +72,23 @@ class ImuService:
         while self._active:
             with self._lock:
                 already_open = self._serial is not None and self._serial.is_open
+
             if already_open:
-                # Wait for the read loop to signal disconnect, or time out.
-                self._disconnected.wait(timeout=self.POLL_INTERVAL)
+                # Wait for the read loop to signal a disconnect, or run the
+                # active selftest every SELFTEST_INTERVAL seconds.
+                self._disconnected.wait(timeout=self.SELFTEST_INTERVAL)
                 self._disconnected.clear()
+
+                # Active USB selftest: verify the device is still physically
+                # present even if the serial fd hasn't raised an error yet.
+                if _find_imu_port() is None:
+                    with self._lock:
+                        ser = self._serial
+                    if ser and ser.is_open:
+                        try:
+                            ser.close()
+                        except Exception:
+                            pass
                 continue
 
             port = _find_imu_port()
@@ -82,7 +96,7 @@ class ImuService:
                 self._ds.set_imu_connection(False)
             else:
                 self._connect(port)
-            time.sleep(self.POLL_INTERVAL)
+            time.sleep(self.SELFTEST_INTERVAL)
 
     def _connect(self, port: str) -> None:
         # Try the last known-good baud rate first; fall back to rotation.
