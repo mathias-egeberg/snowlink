@@ -1,19 +1,46 @@
 /**
  * Application entry point.
  *
- * Starts the WebSocket and loads the initial state from the REST API.
+ * Starts the WebSocket and polls the REST API for fresh state snapshots.
  * All screen modules are already loaded by <script> tags above this file.
  */
-(async () => {
-  WS.connect();
+const STATE_REFRESH_MS = 500;
+let _statePollTimer = null;
 
-  try {
-    const snapshot = await API.getState();
-    AppState.update(snapshot);
-  } catch (e) {
-    console.warn('[app] initial state fetch failed', e);
+function startStatePolling() {
+  if (_statePollTimer !== null) return;
+
+  let inFlight = false;
+
+  async function refreshState() {
+    if (inFlight) return;
+    inFlight = true;
+    try {
+      const snapshot = await API.getState();
+      AppState.update(snapshot);
+    } catch (e) {
+      console.warn('[app] state refresh failed', e);
+    } finally {
+      inFlight = false;
+    }
   }
+
+  refreshState();
+  _statePollTimer = setInterval(refreshState, STATE_REFRESH_MS);
+}
+
+function stopStatePolling() {
+  if (_statePollTimer === null) return;
+  clearInterval(_statePollTimer);
+  _statePollTimer = null;
+}
+
+(() => {
+  WS.connect();
+  startStatePolling();
 })();
+
+window.addEventListener('beforeunload', stopStatePolling);
 
 // ── Centralised header indicator updates ──────────────────────────────────
 // Update every conn-indicator and GPS badge on every screen on every state
