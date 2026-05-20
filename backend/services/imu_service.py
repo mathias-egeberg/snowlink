@@ -25,7 +25,7 @@ from backend.services.selftest import imu_selftest
 
 log = logging.getLogger("snowlink.imu")
 
-SELFTEST_INTERVAL = 3.0
+SELFTEST_INTERVAL = 1.0
 
 _BAUDRATES     = (921600, 115200, 9600)
 _READ_SIZE     = 1024
@@ -58,7 +58,7 @@ class ImuService:
         port = imu_selftest.find_port()
 
         with self._lock:
-            ser    = self._serial
+            ser     = self._serial
             is_open = ser is not None and ser.is_open
 
         if port is None:
@@ -73,6 +73,10 @@ class ImuService:
         elif not is_open:
             # Device present but no open port – connect.
             self._connect(port)
+
+        else:
+            # Device present and port open – positively confirm connected state.
+            self._ds.set_imu_connection(True)
 
     # ── Serial connection ─────────────────────────────────────────────────
 

@@ -42,6 +42,9 @@ let _modelLon   = DEFAULT_LON;
 let _modelBearing = 0.0;
 let _lastBearing  = null;
 let _lastBearingTime = 0;
+let _prevImuReady = false;
+let _lastCenterLat = DEFAULT_LAT;
+let _lastCenterLon = DEFAULT_LON;
 const HEADING_MIN_INTERVAL = 100;  // ms
 const HEADING_MIN_DELTA    = 0.5;  // degrees
 
@@ -291,12 +294,7 @@ function _injectBasemapToggle() {
 
 // ── IMU heading helper ─────────────────────────────────────────────────────
 function _imuBearing(s) {
-  if (
-    s.imu_heading_enabled &&
-    s.imu_ok &&
-    s.imu_yaw_valid &&
-    s.imu_heading_calibrated
-  ) {
+  if (s.imu_heading_enabled && s.imu_ok && s.imu_yaw_valid) {
     return s.imu_heading_deg ?? 0;
   }
   return 0;
@@ -321,22 +319,49 @@ function _onState(s) {
   _setConn('ind-map-gps', s.gps_ok, s.gps_float_rtk);
   _setConn('ind-map-imu', s.imu_ok);
 
-  // Heading update with throttling (mirrors _apply_imu_heading logic).
-  const bearing = _imuBearing(s);
-  const now     = Date.now();
-  const forcible = _lastBearing === null;
-
-  if (!forcible) {
-    if (now - _lastBearingTime < HEADING_MIN_INTERVAL) return;
-    if (shortestDelta(bearing, _lastBearing) < HEADING_MIN_DELTA) return;
-  }
-
   const lat = (s.gps_ok || s.gps_float_rtk) ? (s.gps_lat ?? DEFAULT_LAT) : DEFAULT_LAT;
   const lon = (s.gps_ok || s.gps_float_rtk) ? (s.gps_lon ?? DEFAULT_LON) : DEFAULT_LON;
 
-  moveMarker(lat, lon, bearing);
-  _lastBearing = bearing;
+  // Always keep model position and dot marker in sync with GPS.
+  _modelLat = lat;
+  _modelLon = lon;
+  if (_dotMarker) _dotMarker.setLngLat([lon, lat]);
+
+  // When IMU goes offline, reset bearing tracking so reconnect immediately
+  // snaps the map to the new heading instead of waiting for a large delta.
+  const imuReady = s.imu_ok && s.imu_yaw_valid;
+  if (!imuReady && _prevImuReady) _lastBearing = null;
+  _prevImuReady = imuReady;
+
+  // Bearing / heading update (throttled).
+  const bearing  = _imuBearing(s);
+  const now      = Date.now();
+  const forcible = _lastBearing === null;
+
+  const posChanged = lat !== _lastCenterLat || lon !== _lastCenterLon;
+
+  if (!forcible) {
+    if (now - _lastBearingTime < HEADING_MIN_INTERVAL) {
+      if (posChanged) _map.easeTo({ center: [lon, lat], duration: 120 });
+      else _map.triggerRepaint();
+      _lastCenterLat = lat; _lastCenterLon = lon;
+      return;
+    }
+    if (shortestDelta(bearing, _lastBearing) < HEADING_MIN_DELTA) {
+      if (posChanged) _map.easeTo({ center: [lon, lat], duration: 120 });
+      else _map.triggerRepaint();
+      _lastCenterLat = lat; _lastCenterLon = lon;
+      return;
+    }
+  }
+
+  _modelBearing = bearing;
+  _map.easeTo({ center: [lon, lat], bearing, duration: 120 });
+  _map.triggerRepaint();
+  _lastBearing     = bearing;
   _lastBearingTime = now;
+  _lastCenterLat   = lat;
+  _lastCenterLon   = lon;
 }
 
 function _setConn(id, ok, warn = false) {
