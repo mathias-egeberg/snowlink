@@ -14,6 +14,7 @@ import time
 from typing import Optional
 
 from backend.state import state_manager
+from backend.services.cellular_usage_service import CellularUsageService
 from backend.services.imu_heading import apply_yaw_calibration, normalize_yaw
 from backend.services.settings_service import SettingsService
 
@@ -72,16 +73,37 @@ class DataService:
         while self._active:
             try:
                 from backend.services.selftest import cellular_selftest
-                ok   = cellular_selftest.is_connected()
+                result = cellular_selftest.probe()
+                usage = CellularUsageService.sample(result.iface)
                 prev = state_manager.get_snapshot()['cellular_ok']
-                if ok != prev:
-                    state_manager.update(cellular_ok=ok)
+                self._update_cellular_state(result, usage)
+                if result.ok != prev:
                     state_manager.update(
-                        last_event="Cellular connected" if ok else "Cellular disconnected"
+                        last_event="Cellular connected" if result.ok else "Cellular disconnected"
                     )
             except Exception:
                 log.exception("Cellular selftest error")
             time.sleep(SELFTEST_INTERVAL)
+
+    def _update_cellular_state(self, result, usage: dict) -> None:
+        state_manager.update(
+            cellular_ok=result.ok,
+            cellular_detected=result.detected,
+            cellular_internet_ok=result.internet_reachable,
+            cellular_iface=result.iface or "",
+            cellular_ipv4=result.ipv4 or "",
+            cellular_status_text=result.status_text,
+            cellular_is_huawei=result.is_huawei,
+            cellular_product=result.product or "",
+            cellular_signal_quality_pct=result.signal_quality_pct,
+            cellular_signal_quality_text=result.signal_quality_text,
+            cellular_bytes_received=usage['bytes_received'],
+            cellular_bytes_sent=usage['bytes_sent'],
+            cellular_bytes_total=usage['bytes_total'],
+            cellular_usage_reset_at_ms=usage['reset_at_ms'],
+            cellular_usage_updated_at_ms=usage['updated_at_ms'],
+            cellular_last_checked_at_ms=int(time.time() * 1000),
+        )
 
     # ── Boot report ───────────────────────────────────────────────────────
 
@@ -94,8 +116,13 @@ class DataService:
                 missing.append("IMU")
             if not gps_selftest.find_port():
                 missing.append("GPS")
-            if not cellular_selftest.is_connected():
-                missing.append("Cellular")
+            cellular = cellular_selftest.probe()
+            if not cellular.detected:
+                missing.append("Cellular modem")
+            elif cellular.ipv4 is None:
+                missing.append("Cellular IP")
+            elif not cellular.internet_reachable:
+                missing.append("Cellular internet")
             if missing:
                 state_manager.update(last_event=f"Not found: {', '.join(missing)}")
         except Exception:

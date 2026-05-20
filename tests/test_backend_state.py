@@ -17,6 +17,21 @@ class AppStateDefaultsTest(unittest.TestCase):
         self.assertFalse(s.gps_ok)
         self.assertEqual(s.gps_status_text, "No Fix")
 
+    def test_cellular_fields_default(self):
+        s = AppState()
+        self.assertFalse(s.cellular_ok)
+        self.assertFalse(s.cellular_detected)
+        self.assertFalse(s.cellular_internet_ok)
+        self.assertEqual(s.cellular_status_text, "No modem")
+        self.assertEqual(s.cellular_bytes_received, 0)
+        self.assertEqual(s.cellular_bytes_sent, 0)
+        self.assertEqual(s.cellular_bytes_total, 0)
+        self.assertEqual(s.cellular_usage_reset_at_ms, 0)
+        self.assertEqual(s.cellular_signal_quality_pct, 0)
+        self.assertEqual(s.cellular_signal_quality_text, "No signal")
+        self.assertFalse(s.cellular_speed_test_running)
+        self.assertEqual(s.cellular_speed_test_status, "Never run")
+
 
 class StateManagerTest(unittest.TestCase):
     def setUp(self):
@@ -81,6 +96,25 @@ class StateManagerTest(unittest.TestCase):
     def test_valid_device_keys_constant(self):
         expected = {'heat_roof_on', 'heat_gutter_on', 'pump_on', 'sensor_light_on'}
         self.assertEqual(VALID_DEVICE_KEYS, expected)
+
+    def test_update_cellular_counters(self):
+        self.mgr.update(
+            cellular_detected=True,
+            cellular_internet_ok=True,
+            cellular_bytes_received=1024,
+            cellular_bytes_sent=512,
+            cellular_bytes_total=1536,
+            cellular_signal_quality_pct=80,
+            cellular_signal_quality_text='Good',
+        )
+        snap = self.mgr.get_snapshot()
+        self.assertTrue(snap['cellular_detected'])
+        self.assertTrue(snap['cellular_internet_ok'])
+        self.assertEqual(snap['cellular_bytes_received'], 1024)
+        self.assertEqual(snap['cellular_bytes_sent'], 512)
+        self.assertEqual(snap['cellular_bytes_total'], 1536)
+        self.assertEqual(snap['cellular_signal_quality_pct'], 80)
+        self.assertEqual(snap['cellular_signal_quality_text'], 'Good')
 
 
 if __name__ == '__main__':

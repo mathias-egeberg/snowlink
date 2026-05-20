@@ -12,6 +12,7 @@ venv/
 # Env files
 .env
 *.log
+cellular_usage.json
 
 # C extensions
 *.so

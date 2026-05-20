@@ -37,6 +37,28 @@ class AppState:
 
     # ── GPS / RTK ─────────────────────────────────────────────────────────
     cellular_ok: bool = False
+    cellular_detected: bool = False
+    cellular_internet_ok: bool = False
+    cellular_iface: str = ""
+    cellular_ipv4: str = ""
+    cellular_status_text: str = "No modem"
+    cellular_is_huawei: bool = False
+    cellular_product: str = ""
+    cellular_bytes_received: int = 0
+    cellular_bytes_sent: int = 0
+    cellular_bytes_total: int = 0
+    cellular_usage_reset_at_ms: int = 0
+    cellular_usage_updated_at_ms: int = 0
+    cellular_last_checked_at_ms: int = 0
+    cellular_signal_quality_pct: int = 0
+    cellular_signal_quality_text: str = "No signal"
+    cellular_speed_test_running: bool = False
+    cellular_speed_test_status: str = "Never run"
+    cellular_speed_test_download_mbps: float = 0.0
+    cellular_speed_test_upload_mbps: float = 0.0
+    cellular_speed_test_latency_ms: float = 0.0
+    cellular_speed_test_last_run_at_ms: int = 0
+    cellular_speed_test_error: str = ""
     gps_ok: bool = False
     gps_float_rtk: bool = False
     gps_status_text: str = "No Fix"
