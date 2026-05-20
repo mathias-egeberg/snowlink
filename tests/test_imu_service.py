@@ -81,15 +81,31 @@ class ImuServiceConfigTest(unittest.TestCase):
         self.assertEqual(service._last_good_baud, 921600)
         self.assertTrue(serial.closed)
 
-    def test_tick_marks_disconnected_when_usb_port_disappears(self):
+    def test_tick_leaves_reader_alone_when_serial_is_open(self):
+        # While a reader thread is active (serial.is_open=True), _tick must not
+        # scan USB or change connection state — identical to main branch's
+        # _reconnect_check early-return behaviour.
         data_service = _RecordingDataService()
-        serial = _FakeSerial()
+        serial = _FakeSerial()  # is_open=True by default
         service = _service_for_test(data_service, serial)
 
         with patch.object(imu_service.imu_selftest, 'find_port', return_value=None):
             service._tick()
 
-        self.assertTrue(serial.closed)
+        self.assertFalse(serial.closed)          # reader manages its own lifecycle
+        self.assertEqual(data_service.connections, [])  # no state change
+
+    def test_tick_marks_disconnected_when_reader_exited_and_port_gone(self):
+        # Once the reader has exited (serial closed) and the USB device is gone,
+        # _tick must call set_imu_connection(False).
+        data_service = _RecordingDataService()
+        serial = _FakeSerial()
+        serial.is_open = False  # simulate reader already exited
+        service = _service_for_test(data_service, serial)
+
+        with patch.object(imu_service.imu_selftest, 'find_port', return_value=None):
+            service._tick()
+
         self.assertEqual(data_service.connections, [False])
 
 

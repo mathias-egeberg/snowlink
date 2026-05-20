@@ -48,35 +48,26 @@ class ImuService:
 
     def _loop(self) -> None:
         while self._active:
-            try:
-                self._tick()
-            except Exception:
-                log.exception("IMU loop tick failed")
+            self._tick()
             time.sleep(SELFTEST_INTERVAL)
 
     def _tick(self) -> None:
-        port = imu_selftest.find_port()
+        try:
+            with self._lock:
+                is_open = self._serial is not None and self._serial.is_open
 
-        with self._lock:
-            ser     = self._serial
-            is_open = ser is not None and ser.is_open
-
-        if port is None:
-            # Device gone from USB – force-close if still open, mark disconnected.
             if is_open:
-                try:
-                    ser.close()
-                except Exception:
-                    pass
-            self._ds.set_imu_connection(False)
+                return  # Reader thread is active — let it manage the connection.
 
-        elif not is_open:
-            # Device present but no open port – connect.
+            port = imu_selftest.find_port()
+            if port is None:
+                self._ds.set_imu_connection(False)
+                return
+
             self._connect(port)
-
-        else:
-            # Device present and port open – positively confirm connected state.
-            self._ds.set_imu_connection(True)
+        except Exception:
+            log.exception("IMU tick failed")
+            self._ds.set_imu_connection(False)
 
     # ── Serial connection ─────────────────────────────────────────────────
 
