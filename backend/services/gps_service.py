@@ -56,17 +56,25 @@ class GpsService:
 
     def _poll_loop(self) -> None:
         while self._active:
-            with self._lock:
-                already_open = self._serial is not None and self._serial.is_open
-            if already_open:
-                time.sleep(self.POLL_INTERVAL)
-                continue
-
             port = _find_gps_port()
-            if port:
-                self._connect(port)
-            else:
+            with self._lock:
+                ser = self._serial
+                is_open = ser is not None and ser.is_open
+
+            if port is None:
+                # Device physically removed — force-close serial if still open
+                if is_open:
+                    try:
+                        ser.close()
+                    except Exception:
+                        pass
+                    with self._lock:
+                        if self._serial is ser:
+                            self._serial = None
                 self._ds.set_gps(False, False, "Disconnected")
+            elif not is_open:
+                self._connect(port)
+
             time.sleep(self.POLL_INTERVAL)
 
     def _connect(self, port: str) -> None:
