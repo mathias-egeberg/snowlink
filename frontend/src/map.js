@@ -32,6 +32,8 @@ const DEFAULT_LON = 11.0196226;
 // Model extents: ~375 mm × 214 mm × 162 mm native units.
 // Real snowcat ≈ 8 m long → world scale = 8000/375 ≈ 21.3
 const MODEL_SCALE_FACTOR = 21.3;
+const HEADING_SMOOTHING_RATE = 18.0;
+const HEADING_EPSILON_DEG = 0.05;
 
 // ── State ─────────────────────────────────────────────────────────────────
 let _map        = null;
@@ -40,14 +42,100 @@ let _showSnowcat = true;
 let _modelLat   = DEFAULT_LAT;
 let _modelLon   = DEFAULT_LON;
 let _modelBearing = 0.0;
-let _lastBearing  = null;
-let _lastBearingTime = 0;
-const HEADING_MIN_INTERVAL = 100;  // ms
-const HEADING_MIN_DELTA    = 0.5;  // degrees
+let _targetBearing = 0.0;
+let _displayBearing = 0.0;
+let _lastValidBearing = 0.0;
+let _headingAnimationId = null;
+let _lastHeadingFrameAt = null;
+let _headingCameraControlled = false;
+let _releaseCameraAfterHeadingAnimation = false;
+let _prevImuReady = false;
 
-// ── Shortest angular delta ─────────────────────────────────────────────────
-function shortestDelta(a, b) {
-  return Math.abs(((a - b + 180) % 360) - 180);
+function normalizeBearing(degrees) {
+  return (degrees % 360 + 360) % 360;
+}
+
+function signedBearingDelta(fromDeg, toDeg) {
+  return ((toDeg - fromDeg + 540) % 360) - 180;
+}
+
+function shortestBearingDelta(firstDeg, secondDeg) {
+  return Math.abs(signedBearingDelta(secondDeg, firstDeg));
+}
+
+function _applyDisplayedBearing(bearing) {
+  _displayBearing = normalizeBearing(bearing);
+  _modelBearing = _displayBearing;
+  if (_headingCameraControlled && _map) {
+    _map.setBearing(_displayBearing);
+  }
+  if (_map) _map.triggerRepaint();
+}
+
+function _finishHeadingAnimation() {
+  if (_headingAnimationId !== null) {
+    cancelAnimationFrame(_headingAnimationId);
+  }
+  if (_releaseCameraAfterHeadingAnimation) {
+    _headingCameraControlled = false;
+    _releaseCameraAfterHeadingAnimation = false;
+  }
+  _headingAnimationId = null;
+  _lastHeadingFrameAt = null;
+}
+
+function _cancelHeadingAnimationForUser() {
+  if (_headingAnimationId !== null) {
+    cancelAnimationFrame(_headingAnimationId);
+  }
+  _headingAnimationId = null;
+  _lastHeadingFrameAt = null;
+  _headingCameraControlled = false;
+  _releaseCameraAfterHeadingAnimation = false;
+}
+
+function _animateHeading(timestamp) {
+  if (!_map) {
+    _finishHeadingAnimation();
+    return;
+  }
+
+  if (_lastHeadingFrameAt === null) {
+    _lastHeadingFrameAt = timestamp;
+    _headingAnimationId = requestAnimationFrame(_animateHeading);
+    return;
+  }
+
+  const delta = signedBearingDelta(_displayBearing, _targetBearing);
+  if (Math.abs(delta) <= HEADING_EPSILON_DEG) {
+    _applyDisplayedBearing(_targetBearing);
+    _finishHeadingAnimation();
+    return;
+  }
+
+  // Cap frame delta so tab focus changes do not create a huge bearing jump.
+  const elapsedSeconds = Math.min((timestamp - _lastHeadingFrameAt) / 1000, 0.1);
+  _lastHeadingFrameAt = timestamp;
+  const step = 1 - Math.exp(-HEADING_SMOOTHING_RATE * elapsedSeconds);
+  _applyDisplayedBearing(_displayBearing + delta * step);
+  _headingAnimationId = requestAnimationFrame(_animateHeading);
+}
+
+function _setHeadingTarget(bearing, controlCamera, releaseCameraWhenDone = false) {
+  _targetBearing = normalizeBearing(bearing);
+  _headingCameraControlled = controlCamera;
+  _releaseCameraAfterHeadingAnimation = releaseCameraWhenDone;
+
+  if (shortestBearingDelta(_displayBearing, _targetBearing) <= HEADING_EPSILON_DEG) {
+    _applyDisplayedBearing(_targetBearing);
+    _finishHeadingAnimation();
+    return;
+  }
+
+  if (_headingAnimationId === null) {
+    _lastHeadingFrameAt = null;
+    _headingAnimationId = requestAnimationFrame(_animateHeading);
+  }
 }
 
 // ── Mercator transform helpers ─────────────────────────────────────────────
@@ -141,7 +229,7 @@ const snowcatLayer = {
     this.renderer.resetState();
     this.renderer.render(this.scene, this.camera);
     // triggerRepaint() removed from here — the model is static between GPS
-    // updates; re-render is triggered by moveMarker() and setMarkerStyle().
+    // updates; re-render is triggered by _onState() and setMarkerStyle().
   },
 };
 
@@ -152,18 +240,6 @@ function setMarkerStyle(style) {
     _dotMarker.getElement().style.display = (style === 'dot') ? '' : 'none';
   }
   if (_map) _map.triggerRepaint();
-}
-
-// ── Move marker + camera ───────────────────────────────────────────────────
-function moveMarker(lat, lon, bearing) {
-  _modelLat     = lat;
-  _modelLon     = lon;
-  _modelBearing = bearing;
-  if (_dotMarker) _dotMarker.setLngLat([lon, lat]);
-  if (_map) {
-    _map.easeTo({ center: [lon, lat], bearing, duration: 120 });
-    _map.triggerRepaint();
-  }
 }
 
 // ── Basemap toggle ─────────────────────────────────────────────────────────
@@ -184,12 +260,15 @@ function initMap(initialState) {
 
   const lat = initialState.gps_lat ?? DEFAULT_LAT;
   const lon = initialState.gps_lon ?? DEFAULT_LON;
-  const bearing = _imuBearing(initialState);
+  const bearing = _isImuHeadingReady(initialState) ? _imuBearing(initialState) : 0;
   const style    = initialState.marker_style ?? 'snowcat';
 
   _modelLat     = lat;
   _modelLon     = lon;
   _modelBearing = bearing;
+  _targetBearing = bearing;
+  _displayBearing = bearing;
+  _lastValidBearing = bearing;
 
   _map = new maplibregl.Map({
     container: 'map',
@@ -229,6 +308,12 @@ function initMap(initialState) {
     new maplibregl.NavigationControl({ visualizePitch: true }),
     'bottom-right',
   );
+
+  _map.on('rotatestart', (event) => {
+    if (event.originalEvent) {
+      _cancelHeadingAnimationForUser();
+    }
+  });
 
   _map.on('load', () => {
     _map.addLayer(snowcatLayer);
@@ -290,60 +375,60 @@ function _injectBasemapToggle() {
 }
 
 // ── IMU heading helper ─────────────────────────────────────────────────────
-function _imuBearing(s) {
-  if (
-    s.imu_heading_enabled &&
-    s.imu_ok &&
-    s.imu_yaw_valid &&
-    s.imu_heading_calibrated
-  ) {
-    return s.imu_heading_deg ?? 0;
+function _isImuHeadingReady(s) {
+  if (s.imu_heading_enabled && s.imu_ok && s.imu_yaw_valid && s.imu_heading_calibrated) {
+    return true;
   }
-  return 0;
+  return false;
+}
+
+function _imuBearing(s) {
+  return s.imu_heading_deg ?? 0;
 }
 
 // ── WebSocket state handler ────────────────────────────────────────────────
 function _onState(s) {
   if (!_map) return;
 
-  // Marker style (controlled via settings).
-  const style = s.marker_style ?? 'snowcat';
-  setMarkerStyle(style);
+  setMarkerStyle(s.marker_style ?? 'snowcat');
 
-  // Update GPS badge on the map header.
-  const gpsTxt = document.getElementById('map-gps-text');
-  if (gpsTxt) {
-    gpsTxt.textContent = s.gps_status_text ?? 'No Fix';
-    const cls = s.gps_ok ? 'ok' : (s.gps_float_rtk ? 'warning' : 'danger');
-    gpsTxt.className = `badge-value ${cls}`;
-  }
-  _setConn('ind-map-5g',  s.cellular_ok);
-  _setConn('ind-map-gps', s.gps_ok, s.gps_float_rtk);
-  _setConn('ind-map-imu', s.imu_ok);
-
-  // Heading update with throttling (mirrors _apply_imu_heading logic).
-  const bearing = _imuBearing(s);
-  const now     = Date.now();
-  const forcible = _lastBearing === null;
-
-  if (!forcible) {
-    if (now - _lastBearingTime < HEADING_MIN_INTERVAL) return;
-    if (shortestDelta(bearing, _lastBearing) < HEADING_MIN_DELTA) return;
-  }
-
+  // Sync GPS position and dot marker every tick.
   const lat = (s.gps_ok || s.gps_float_rtk) ? (s.gps_lat ?? DEFAULT_LAT) : DEFAULT_LAT;
   const lon = (s.gps_ok || s.gps_float_rtk) ? (s.gps_lon ?? DEFAULT_LON) : DEFAULT_LON;
+  const positionChanged = lat !== _modelLat || lon !== _modelLon;
+  if (positionChanged) {
+    _modelLat = lat;
+    _modelLon = lon;
+    if (_dotMarker) _dotMarker.setLngLat([lon, lat]);
+  }
 
-  moveMarker(lat, lon, bearing);
-  _lastBearing = bearing;
-  _lastBearingTime = now;
-}
+  // Process bearing every WebSocket tick so slow rotation is not dropped.
+  // Rendering still uses small delta gates to avoid unnecessary repaints.
+  const imuReady = _isImuHeadingReady(s);
+  const bearing = imuReady ? _imuBearing(s) : _lastValidBearing;
+  if (imuReady) {
+    _lastValidBearing = bearing;
+  }
+  const imuReadyChanged = imuReady !== _prevImuReady;
 
-function _setConn(id, ok, warn = false) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.classList.toggle('ok',      ok && !warn);
-  el.classList.toggle('warning', !ok && warn);
+  // Log connect/disconnect so the user can verify detection in the browser
+  // console (F12 → Console) while debugging.
+  if (imuReadyChanged) {
+    console.info('[SnowLink] IMU', imuReady ? 'connected' : 'disconnected',
+      '— heading', bearing.toFixed(1) + '°');
+  }
+
+  const headingChanged =
+    shortestBearingDelta(_targetBearing, bearing) > HEADING_EPSILON_DEG ||
+    shortestBearingDelta(_displayBearing, bearing) > HEADING_EPSILON_DEG;
+  if (imuReady || imuReadyChanged || headingChanged) {
+    _setHeadingTarget(bearing, imuReady || imuReadyChanged, !imuReady);
+  }
+  if (positionChanged) {
+    _map.setCenter([lon, lat]);
+    _map.triggerRepaint();
+  }
+  _prevImuReady = imuReady;
 }
 
 // ── Map clock ──────────────────────────────────────────────────────────────
@@ -379,6 +464,7 @@ document.addEventListener('screenchange', (e) => {
     if (s && _map) _onState(s);
   } else {
     _stopClock();
+    _finishHeadingAnimation();
   }
 });
 

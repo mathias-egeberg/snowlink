@@ -8,6 +8,7 @@ const API = (() => {
   async function _json(method, path, body) {
     const opts = {
       method,
+      cache: 'no-store',
       headers: { 'Content-Type': 'application/json' },
     };
     if (body !== undefined) opts.body = JSON.stringify(body);
@@ -25,5 +26,7 @@ const API = (() => {
     postSettings:(payload) => _json('POST', '/api/settings', payload),
     toggleDevice:(key)    => _json('POST', '/api/control/device', { device_key: key }),
     calibrateImu:()       => _json('POST', '/api/settings/calibrate-imu'),
+    resetCellularUsage:() => _json('POST', '/api/settings/cellular-usage/reset'),
+    runCellularSpeedTest:() => _json('POST', '/api/settings/cellular-speed-test'),
   };
 })();

@@ -1,8 +1,17 @@
+import asyncio
+
 from fastapi import APIRouter, Body, HTTPException
+from backend.services.cellular_speed_test_service import CellularSpeedTestService
+from backend.services.cellular_usage_service import (
+    CellularUsagePersistenceError,
+    CellularUsageService,
+)
+from backend.services.selftest import cellular_selftest
 from backend.services.settings_service import SettingsService, VALID_MARKER_STYLES
 from backend.state import state_manager
 
 router = APIRouter()
+_CELLULAR_SPEED_TEST_TIMEOUT_SECONDS = 40.0
 
 
 @router.get("/settings")
@@ -44,12 +53,13 @@ async def post_settings(payload: dict = Body(...)) -> dict:
             m["imu_heading_enabled"] = new_imu
 
         # imu_yaw_zero_deg is only written by the calibration endpoint,
-        # but allow it here too for completeness.
-        zero = map_in.get("imu_yaw_zero_deg")
-        if zero is None:
-            m["imu_yaw_zero_deg"] = None
-        elif isinstance(zero, (int, float)):
-            m["imu_yaw_zero_deg"] = float(zero) % 360.0
+        # but allow explicit updates here too for completeness.
+        if "imu_yaw_zero_deg" in map_in:
+            zero = map_in["imu_yaw_zero_deg"]
+            if zero is None:
+                m["imu_yaw_zero_deg"] = None
+            elif isinstance(zero, (int, float)):
+                m["imu_yaw_zero_deg"] = float(zero) % 360.0
 
     SettingsService._validate_loaded_data(data)
     SettingsService.save()
@@ -74,3 +84,91 @@ async def calibrate_imu() -> dict:
             detail="IMU yaw not available — ensure IMU is connected and sending data.",
         )
     return {"ok": True, "state": state_manager.get_snapshot()}
+
+
+@router.post("/settings/cellular-usage/reset")
+async def reset_cellular_usage() -> dict:
+    """Reset the local cellular data counter and keep current counters as baseline."""
+    try:
+        snapshot = state_manager.get_snapshot()
+        iface = snapshot.get('cellular_iface') or None
+        usage = CellularUsageService.reset(iface)
+    except CellularUsagePersistenceError as exc:
+        raise HTTPException(status_code=500, detail="Unable to reset cellular usage counter") from exc
+    state_manager.update(
+        cellular_bytes_received=usage['bytes_received'],
+        cellular_bytes_sent=usage['bytes_sent'],
+        cellular_bytes_total=usage['bytes_total'],
+        cellular_usage_reset_at_ms=usage['reset_at_ms'],
+        cellular_usage_updated_at_ms=usage['updated_at_ms'],
+        last_event="Cellular data counter reset",
+    )
+    return {"ok": True, "state": state_manager.get_snapshot()}
+
+
+@router.post("/settings/cellular-speed-test")
+async def run_cellular_speed_test() -> dict:
+    """Run a lightweight speed test through the current cellular interface."""
+    snapshot = state_manager.get_snapshot()
+    iface = snapshot.get('cellular_iface') or None
+    ipv4 = snapshot.get('cellular_ipv4') or None
+
+    if not iface or not ipv4:
+        probe = cellular_selftest.probe(require_internet=False)
+        iface = probe.iface
+        ipv4 = probe.ipv4
+
+    if not iface or not ipv4:
+        state_manager.update(
+            cellular_speed_test_running=False,
+            cellular_speed_test_status='No cellular IP',
+            cellular_speed_test_error='Cellular modem must be detected with an IPv4 address first',
+        )
+        raise HTTPException(status_code=409, detail='Cellular modem must be detected with an IPv4 address first')
+
+    state_manager.update(
+        cellular_speed_test_running=True,
+        cellular_speed_test_status='Testing',
+        cellular_speed_test_error='',
+        last_event='Cellular speed test started',
+    )
+
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(CellularSpeedTestService.run, iface, ipv4),
+            timeout=_CELLULAR_SPEED_TEST_TIMEOUT_SECONDS,
+        )
+        usage = CellularUsageService.sample(iface)
+    except asyncio.TimeoutError as exc:
+        state_manager.update(
+            cellular_speed_test_running=False,
+            cellular_speed_test_status='Timed out',
+            cellular_speed_test_error='Speed test timed out',
+            last_event='Cellular speed test timed out',
+        )
+        raise HTTPException(status_code=504, detail='Cellular speed test timed out') from exc
+    except Exception as exc:
+        state_manager.update(
+            cellular_speed_test_running=False,
+            cellular_speed_test_status='Failed',
+            cellular_speed_test_error='Speed test failed',
+            last_event='Cellular speed test failed',
+        )
+        raise HTTPException(status_code=500, detail='Cellular speed test failed') from exc
+    status = 'Complete' if result.ok else 'Failed'
+    state_manager.update(
+        cellular_speed_test_running=False,
+        cellular_speed_test_status=status,
+        cellular_speed_test_download_mbps=result.download_mbps,
+        cellular_speed_test_upload_mbps=result.upload_mbps,
+        cellular_speed_test_latency_ms=result.latency_ms,
+        cellular_speed_test_last_run_at_ms=result.tested_at_ms,
+        cellular_speed_test_error=result.error or '',
+        cellular_bytes_received=usage['bytes_received'],
+        cellular_bytes_sent=usage['bytes_sent'],
+        cellular_bytes_total=usage['bytes_total'],
+        cellular_usage_reset_at_ms=usage['reset_at_ms'],
+        cellular_usage_updated_at_ms=usage['updated_at_ms'],
+        last_event='Cellular speed test complete' if result.ok else 'Cellular speed test failed',
+    )
+    return {"ok": result.ok, "speed_test": result.to_dict(), "state": state_manager.get_snapshot()}

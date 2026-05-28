@@ -8,9 +8,20 @@ const AppState = (() => {
   let _data = {};
   const _listeners = [];
 
+  function snapshotTime(snapshot) {
+    const value = snapshot?.snapshot_generated_at_ms;
+    return Number.isFinite(value) ? value : null;
+  }
+
   return {
     /** Replace the current snapshot and notify all listeners. */
     update(snapshot) {
+      const nextTime = snapshotTime(snapshot);
+      const currentTime = snapshotTime(_data);
+      if (nextTime !== null && currentTime !== null && nextTime < currentTime) {
+        return;
+      }
+
       _data = snapshot;
       for (const fn of _listeners) {
         try { fn(snapshot); } catch (e) { console.error('[AppState]', e); }

@@ -2,7 +2,7 @@
 import copy
 import unittest
 
-from backend.services.settings_service import SettingsService
+from backend.services.settings_service import SettingsService, _DEFAULTS
 
 
 class BackendSettingsServiceTest(unittest.TestCase):
@@ -28,6 +28,9 @@ class BackendSettingsServiceTest(unittest.TestCase):
         self.assertEqual(data['ntrip']['host'], '')
         self.assertFalse(data['map']['imu_heading_enabled'])
         self.assertAlmostEqual(data['map']['imu_yaw_zero_deg'], 10.5)
+
+    def test_default_imu_heading_enabled_is_false(self):
+        self.assertFalse(_DEFAULTS['map']['imu_heading_enabled'])
 
     def test_validate_restores_missing_sections(self):
         data = {'ntrip': 'bad', 'map': 42}
