@@ -546,6 +546,171 @@ html, body {
   border-radius: 2px;
 }
 
+/* ── GPS indicator — clickable action ────────────────────────────── */
+.conn-indicator.gps-action {
+  cursor: pointer;
+}
+.conn-indicator.gps-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ── GPS status overlay (sub-page) ───────────────────────────────── */
+.gps-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.gps-overlay.hidden {
+  display: none;
+}
+
+.gps-overlay-header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  height: var(--header-height);
+  min-height: var(--header-height);
+  padding: 0 24px;
+  gap: 16px;
+  background: var(--surface);
+  border-bottom: 1px solid rgba(0, 180, 216, 0.3);
+  flex-shrink: 0;
+}
+
+.back-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px 8px 10px;
+  background: var(--card);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+.back-btn:active {
+  background: rgba(0, 180, 216, 0.2);
+}
+.back-btn svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.gps-overlay-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.gps-overlay-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding: 20px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gps-overlay-content::-webkit-scrollbar { width: 4px; }
+.gps-overlay-content::-webkit-scrollbar-thumb {
+  background: rgba(0, 180, 216, 0.3);
+  border-radius: 2px;
+}
+
+/* ── GPS status banner ────────────────────────────────────────────── */
+.gps-banner {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 4px;
+}
+.gps-banner-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gps-banner-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-sec);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.gps-banner-status {
+  font-size: 28px;
+  font-weight: 700;
+}
+.gps-banner-status.ok      { color: var(--success); }
+.gps-banner-status.warning { color: var(--warning); }
+.gps-banner-status.danger  { color: var(--danger); }
+
+.gps-banner-icon {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+}
+.gps-banner-icon.ok      { color: var(--success); }
+.gps-banner-icon.warning { color: var(--warning); }
+.gps-banner-icon.danger  { color: var(--danger); }
+
+/* ── GPS metric grid ──────────────────────────────────────────────── */
+.gps-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.gps-metric-card {
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gps-metric-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-sec);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.gps-metric-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+  word-break: break-all;
+}
+.gps-metric-unit {
+  font-size: 12px;
+  color: var(--text-sec);
+}
+
+/* ── GPS coordinate row (full width) ──────────────────────────────── */
+.gps-coord-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.gps-coord-value {
+  font-size: 18px !important;
+}
+
 /* ── MapLibre overrides ───────────────────────────────────────────── */
 .maplibregl-ctrl-logo { display: none !important; }
 .maplibregl-ctrl-attrib { font-size: 9px; opacity: 0.55; }

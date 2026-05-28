@@ -56,17 +56,25 @@ class GpsService:
 
     def _poll_loop(self) -> None:
         while self._active:
-            with self._lock:
-                already_open = self._serial is not None and self._serial.is_open
-            if already_open:
-                time.sleep(self.POLL_INTERVAL)
-                continue
-
             port = _find_gps_port()
-            if port:
-                self._connect(port)
-            else:
+            with self._lock:
+                ser = self._serial
+                is_open = ser is not None and ser.is_open
+
+            if port is None:
+                # Device physically removed — force-close serial if still open
+                if is_open:
+                    try:
+                        ser.close()
+                    except Exception:
+                        pass
+                    with self._lock:
+                        if self._serial is ser:
+                            self._serial = None
                 self._ds.set_gps(False, False, "Disconnected")
+            elif not is_open:
+                self._connect(port)
+
             time.sleep(self.POLL_INTERVAL)
 
     def _connect(self, port: str) -> None:
@@ -110,14 +118,63 @@ class GpsService:
     def _parse_gga(self, sentence: str) -> None:
         # $xxGGA,time,lat,NS,lon,EW,fix_quality,sats,hdop,alt,M,...
         parts = sentence.split(",")
-        if len(parts) < 7 or parts[6] == "":
+        if len(parts) < 10 or parts[6] == "":
             return
         try:
             fq = int(parts[6])
         except ValueError:
             return
         ok, warn, text = _FIX_TABLE.get(fq, (False, False, "Unknown"))
-        self._ds.set_gps(ok, warn, text)
+
+        satellites = 0
+        hdop = 0.0
+        lat = 0.0
+        lon = 0.0
+        altitude_m = 0.0
+
+        try:
+            if parts[7]:
+                satellites = int(parts[7])
+        except (ValueError, IndexError):
+            pass
+        try:
+            if parts[8]:
+                hdop = float(parts[8])
+        except (ValueError, IndexError):
+            pass
+        try:
+            if parts[9]:
+                altitude_m = float(parts[9])
+        except (ValueError, IndexError):
+            pass
+        try:
+            if parts[2] and parts[3]:
+                raw = float(parts[2])
+                deg = int(raw / 100)
+                lat = deg + (raw - deg * 100) / 60.0
+                if parts[3] == 'S':
+                    lat = -lat
+        except (ValueError, IndexError):
+            pass
+        try:
+            if parts[4] and parts[5]:
+                raw = float(parts[4])
+                deg = int(raw / 100)
+                lon = deg + (raw - deg * 100) / 60.0
+                if parts[5] == 'W':
+                    lon = -lon
+        except (ValueError, IndexError):
+            pass
+
+        self._ds.set_gps(
+            ok, warn, text,
+            satellites=satellites,
+            hdop=hdop,
+            lat=lat,
+            lon=lon,
+            altitude_m=altitude_m,
+            fix_quality=fq,
+        )
 
     # ── Cleanup ───────────────────────────────────────────────────────────
 

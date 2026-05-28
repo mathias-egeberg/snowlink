@@ -48,7 +48,10 @@
             <svg class="conn-svg" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true"><rect x="0" y="12" width="4" height="4" rx="0.5"/><rect x="6.5" y="9" width="4" height="7" rx="0.5"/><rect x="13" y="6" width="4" height="10" rx="0.5"/><rect x="19.5" y="2" width="4" height="14" rx="0.5"/></svg>
             <span class="conn-label">5G</span>
           </div>
-          <div class="conn-indicator" id="ind-dash-gps" title="GPS">
+          <div class="conn-indicator gps-action" id="ind-dash-gps" title="GPS Status"
+               role="button" tabindex="0" aria-label="Open GPS Status"
+               onclick="GpsStatus.open()"
+               onkeydown="if(event.key==='Enter'||event.key===' ')GpsStatus.open()">
             <svg class="conn-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><line x1="1" y1="12" x2="23" y2="12"/><line x1="12" y1="1" x2="12" y2="23"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/></svg>
             <span class="conn-label">GPS</span>
           </div>
@@ -124,7 +127,10 @@
             <svg class="conn-svg" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true"><rect x="0" y="12" width="4" height="4" rx="0.5"/><rect x="6.5" y="9" width="4" height="7" rx="0.5"/><rect x="13" y="6" width="4" height="10" rx="0.5"/><rect x="19.5" y="2" width="4" height="14" rx="0.5"/></svg>
             <span class="conn-label">5G</span>
           </div>
-          <div class="conn-indicator" id="ind-map-gps" title="GPS">
+          <div class="conn-indicator gps-action" id="ind-map-gps" title="GPS Status"
+               role="button" tabindex="0" aria-label="Open GPS Status"
+               onclick="GpsStatus.open()"
+               onkeydown="if(event.key==='Enter'||event.key===' ')GpsStatus.open()">
             <svg class="conn-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><line x1="1" y1="12" x2="23" y2="12"/><line x1="12" y1="1" x2="12" y2="23"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/></svg>
             <span class="conn-label">GPS</span>
           </div>
@@ -166,7 +172,10 @@
             <svg class="conn-svg" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true"><rect x="0" y="12" width="4" height="4" rx="0.5"/><rect x="6.5" y="9" width="4" height="7" rx="0.5"/><rect x="13" y="6" width="4" height="10" rx="0.5"/><rect x="19.5" y="2" width="4" height="14" rx="0.5"/></svg>
             <span class="conn-label">5G</span>
           </div>
-          <div class="conn-indicator" id="ind-ctrl-gps" title="GPS">
+          <div class="conn-indicator gps-action" id="ind-ctrl-gps" title="GPS Status"
+               role="button" tabindex="0" aria-label="Open GPS Status"
+               onclick="GpsStatus.open()"
+               onkeydown="if(event.key==='Enter'||event.key===' ')GpsStatus.open()">
             <svg class="conn-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><line x1="1" y1="12" x2="23" y2="12"/><line x1="12" y1="1" x2="12" y2="23"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/></svg>
             <span class="conn-label">GPS</span>
           </div>
@@ -252,7 +261,10 @@
             <svg class="conn-svg" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true"><rect x="0" y="12" width="4" height="4" rx="0.5"/><rect x="6.5" y="9" width="4" height="7" rx="0.5"/><rect x="13" y="6" width="4" height="10" rx="0.5"/><rect x="19.5" y="2" width="4" height="14" rx="0.5"/></svg>
             <span class="conn-label">5G</span>
           </div>
-          <div class="conn-indicator" id="ind-set-gps" title="GPS">
+          <div class="conn-indicator gps-action" id="ind-set-gps" title="GPS Status"
+               role="button" tabindex="0" aria-label="Open GPS Status"
+               onclick="GpsStatus.open()"
+               onkeydown="if(event.key==='Enter'||event.key===' ')GpsStatus.open()">
             <svg class="conn-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><line x1="1" y1="12" x2="23" y2="12"/><line x1="12" y1="1" x2="12" y2="23"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/></svg>
             <span class="conn-label">GPS</span>
           </div>
@@ -356,6 +368,18 @@
 
       </div><!-- /map card -->
 
+      <!-- GPS ----------------------------------------------------------- -->
+      <div class="section-label">GPS / RTK</div>
+      <div class="settings-card">
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-title">GPS Status</span>
+            <span class="settings-row-desc">Satellites, fix type, coordinates and NTRIP</span>
+          </div>
+          <button class="pill-btn accent" onclick="GpsStatus.open()">Open</button>
+        </div>
+      </div>
+
       <!-- APPLICATION --------------------------------------------------- -->
       <div class="section-label">APPLICATION</div>
       <div class="settings-card">
@@ -391,6 +415,107 @@
     </button>
   </nav>
 
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- GPS STATUS OVERLAY (sub-page, z-index 500)                        -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <div id="gps-overlay" class="gps-overlay hidden" role="main" aria-label="GPS Status">
+
+    <header class="gps-overlay-header">
+      <button class="back-btn" onclick="GpsStatus.close()" aria-label="Back">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="15 18 9 12 15 6"/>
+        </svg>
+        Back
+      </button>
+      <span class="gps-overlay-title">GPS Status</span>
+    </header>
+
+    <div class="gps-overlay-content">
+
+      <!-- Fix status banner -->
+      <div class="gps-banner">
+        <div class="gps-banner-left">
+          <span class="gps-banner-label">Fix Type</span>
+          <span id="gps-banner-status" class="gps-banner-status danger">No Fix</span>
+        </div>
+        <svg id="gps-banner-icon" class="gps-banner-icon danger"
+             viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="7"/>
+          <line x1="1" y1="12" x2="23" y2="12"/>
+          <line x1="12" y1="1" x2="12" y2="23"/>
+          <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/>
+        </svg>
+      </div>
+
+      <!-- Satellite / HDOP / Quality metrics -->
+      <div class="section-label">Signal</div>
+      <div class="gps-metric-grid">
+        <div class="gps-metric-card">
+          <span class="gps-metric-label">Satellites</span>
+          <span id="gps-satellites" class="gps-metric-value">--</span>
+          <span class="gps-metric-unit">in view</span>
+        </div>
+        <div class="gps-metric-card">
+          <span class="gps-metric-label">HDOP</span>
+          <span id="gps-hdop" class="gps-metric-value">--</span>
+          <span class="gps-metric-unit">accuracy</span>
+        </div>
+        <div class="gps-metric-card">
+          <span class="gps-metric-label">Fix Quality</span>
+          <span id="gps-fix-quality" class="gps-metric-value">--</span>
+          <span class="gps-metric-unit">code (0–6)</span>
+        </div>
+      </div>
+
+      <!-- Altitude -->
+      <div class="section-label">Altitude</div>
+      <div class="gps-metric-grid">
+        <div class="gps-metric-card">
+          <span class="gps-metric-label">Altitude</span>
+          <span id="gps-altitude" class="gps-metric-value">--</span>
+          <span class="gps-metric-unit">metres (MSL)</span>
+        </div>
+      </div>
+
+      <!-- Coordinates -->
+      <div class="section-label">Position</div>
+      <div class="gps-coord-grid">
+        <div class="gps-metric-card">
+          <span class="gps-metric-label">Latitude</span>
+          <span id="gps-lat" class="gps-metric-value gps-coord-value">--</span>
+          <span class="gps-metric-unit">degrees</span>
+        </div>
+        <div class="gps-metric-card">
+          <span class="gps-metric-label">Longitude</span>
+          <span id="gps-lon" class="gps-metric-value gps-coord-value">--</span>
+          <span class="gps-metric-unit">degrees</span>
+        </div>
+      </div>
+
+      <!-- NTRIP / RTK -->
+      <div class="section-label">RTK Corrections</div>
+      <div class="settings-card">
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-title">NTRIP Caster</span>
+            <span id="gps-ntrip-status" class="settings-row-desc">Disabled</span>
+          </div>
+        </div>
+        <div class="settings-divider"></div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-title">Device</span>
+            <span id="gps-device-status" class="settings-row-desc cellular-status danger">Disconnected</span>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /gps-overlay-content -->
+  </div><!-- /gps-overlay -->
+
+
   <!-- Exit confirmation dialog -->
   <div id="exit-overlay" class="exit-overlay hidden" onclick="ExitDialog.hide()">
     <div class="exit-dialog" onclick="event.stopPropagation()">
@@ -412,6 +537,7 @@
 <script src="/src/dashboard.js"></script>
 <script src="/src/controls.js"></script>
 <script src="/src/settings.js"></script>
+<script src="/src/gps.js"></script>
 <script src="/src/app.js"></script>
 
 <!-- Map module last (uses ES module imports for Three.js) -->
