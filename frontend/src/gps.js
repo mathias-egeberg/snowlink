@@ -71,19 +71,18 @@ const GpsStatus = (() => {
     const ntripStatus = document.getElementById('gps-ntrip-status');
     if (ntripStatus) {
       ntripStatus.textContent = s.ntrip_status_text ?? 'Disabled';
-      ntripStatus.className = `settings-row-desc ${s.ntrip_ok ? 'ok' : ''}`
-        .replace(/\s+ok$/, s.ntrip_ok ? ' cellular-status ok' : '');
+      ntripStatus.className = `settings-row-desc cellular-status ${s.ntrip_ok ? 'ok' : ''}`.trim();
     }
 
-    // Device connection row
-    _set('gps-device-status', s.gps_ok || s.gps_float_rtk
-      ? 'Connected'
-      : (s.gps_status_text === 'Disconnected' || s.gps_status_text === 'No Fix' ? s.gps_status_text : 'Disconnected'));
+    // Device USB connection row.
+    // "Disconnected" / "Error" means the USB device is not present.
+    // Any other status (including "No Fix") means the module IS on the bus
+    // and communicating — just hasn't acquired satellite lock yet.
+    const disconnected = s.gps_status_text === 'Disconnected' || s.gps_status_text === 'Error';
+    _set('gps-device-status', disconnected ? (s.gps_status_text ?? 'Disconnected') : 'Connected');
     const devStatus = document.getElementById('gps-device-status');
     if (devStatus) {
-      devStatus.className = `settings-row-desc cellular-status ${
-        s.gps_ok ? 'ok' : (s.gps_float_rtk ? 'warning' : 'danger')
-      }`;
+      devStatus.className = `settings-row-desc cellular-status ${disconnected ? 'danger' : 'ok'}`;
     }
   }
 
