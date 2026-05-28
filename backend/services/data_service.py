@@ -104,12 +104,34 @@ class DataService:
 
     # ── GPS interface (called by GpsService from its thread) ──────────────
 
-    def set_gps(self, ok: bool, float_rtk: bool, status_text: str) -> None:
+    def set_gps(
+        self,
+        ok: bool,
+        float_rtk: bool,
+        status_text: str,
+        satellites: int = 0,
+        hdop: float = 0.0,
+        lat: float = 0.0,
+        lon: float = 0.0,
+        altitude_m: float = 0.0,
+        fix_quality: int = 0,
+    ) -> None:
+        prev_ok = state_manager.get_snapshot()['gps_ok']
         state_manager.update(
             gps_ok=ok,
             gps_float_rtk=float_rtk,
             gps_status_text=status_text,
+            gps_satellites=satellites,
+            gps_hdop=hdop,
+            gps_lat=lat,
+            gps_lon=lon,
+            gps_altitude_m=altitude_m,
+            gps_fix_quality=fix_quality,
         )
+        if ok and not prev_ok:
+            state_manager.update(last_event="GPS connected")
+        elif not ok and prev_ok:
+            state_manager.update(last_event="GPS disconnected")
 
     # ── IMU calibration ───────────────────────────────────────────────────
 
