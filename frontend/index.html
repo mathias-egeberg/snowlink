@@ -463,6 +463,176 @@
 
 
   <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- RECORD SCREEN                                                      -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <div id="screen-record" class="screen" role="main">
+
+    <header class="screen-header">
+      <div class="header-left">
+        <span class="app-title">Record</span>
+      </div>
+      <div class="header-right">
+        <div class="gps-badge">
+          <span class="badge-label">GPS</span>
+          <span id="rec-gps-text" class="badge-value danger">No Fix</span>
+        </div>
+        <div class="conn-indicators">
+          <div class="conn-indicator" id="ind-rec-5g" title="Cellular">
+            <svg class="conn-svg" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true"><rect x="0" y="12" width="4" height="4" rx="0.5"/><rect x="6.5" y="9" width="4" height="7" rx="0.5"/><rect x="13" y="6" width="4" height="10" rx="0.5"/><rect x="19.5" y="2" width="4" height="14" rx="0.5"/></svg>
+            <span class="conn-label">5G</span>
+          </div>
+          <div class="conn-indicator gps-action" id="ind-rec-gps" title="GPS Status"
+               role="button" tabindex="0" aria-label="Open GPS Status"
+               onclick="GpsStatus.open()"
+               onkeydown="if(event.key==='Enter'||event.key===' ')GpsStatus.open()">
+            <svg class="conn-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><line x1="1" y1="12" x2="23" y2="12"/><line x1="12" y1="1" x2="12" y2="23"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/></svg>
+            <span class="conn-label">GPS</span>
+          </div>
+          <div class="conn-indicator" id="ind-rec-imu" title="IMU">
+            <svg class="conn-svg" viewBox="0 0 24 26" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="10" y1="14" x2="19" y2="14"/><polyline points="16,11 20,14 16,17"/><line x1="10" y1="14" x2="10" y2="5"/><polyline points="7,8 10,4 13,8"/><line x1="10" y1="14" x2="3" y2="21"/><polyline points="6,21 3,21 3,18"/></svg>
+            <span class="conn-label">IMU</span>
+          </div>
+        </div>
+        <div class="clock-block">
+          <span id="rec-time" class="clock-time">--:--:--</span>
+          <span id="rec-date" class="clock-date">---</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="record-layout">
+
+      <!-- Left column: recording control -->
+      <div class="record-left">
+
+        <!-- Config panel (shown when not recording) -->
+        <div id="rec-config-panel">
+          <div class="section-label">NEW RECORDING</div>
+          <div class="settings-card">
+
+            <div class="settings-field">
+              <label class="field-label">Session Name</label>
+              <input id="rec-session-name" class="field-input" type="text"
+                     placeholder="e.g. static_test_001" autocomplete="off" maxlength="60" />
+            </div>
+
+            <div class="settings-divider"></div>
+
+            <div class="settings-row">
+              <div class="settings-row-info">
+                <span class="settings-row-title">GNSS Raw</span>
+                <span class="settings-row-desc">lat, lon, alt, fix quality, RTK status, satellites, HDOP</span>
+              </div>
+              <label class="rec-toggle">
+                <input type="checkbox" id="rec-stream-gnss" checked />
+                <span class="rec-toggle-track"></span>
+              </label>
+            </div>
+
+            <div class="settings-divider"></div>
+
+            <div class="settings-row">
+              <div class="settings-row-info">
+                <span class="settings-row-title">IMU Heading</span>
+                <span class="settings-row-desc">yaw angle and calibrated heading from IMU</span>
+              </div>
+              <label class="rec-toggle">
+                <input type="checkbox" id="rec-stream-imu" checked />
+                <span class="rec-toggle-track"></span>
+              </label>
+            </div>
+
+            <div class="settings-divider"></div>
+
+            <div class="settings-row">
+              <div class="settings-row-info">
+                <span class="settings-row-title">System Events</span>
+                <span class="settings-row-desc">connection events, errors, and status changes</span>
+              </div>
+              <label class="rec-toggle">
+                <input type="checkbox" id="rec-stream-system" checked />
+                <span class="rec-toggle-track"></span>
+              </label>
+            </div>
+
+            <div class="settings-divider"></div>
+
+            <div class="rec-action-row">
+              <button id="rec-start-btn" class="rec-start-btn" onclick="Record.start()">
+                &#x23FA; Start Recording
+              </button>
+            </div>
+
+          </div>
+        </div><!-- /rec-config-panel -->
+
+        <!-- Active panel (shown when recording) -->
+        <div id="rec-active-panel" class="hidden">
+          <div class="section-label">RECORDING ACTIVE</div>
+          <div class="settings-card rec-active-card">
+
+            <div class="rec-indicator-row">
+              <span class="rec-dot"></span>
+              <span class="rec-active-label">Recording</span>
+              <span id="rec-duration" class="rec-duration">0:00:00</span>
+            </div>
+
+            <div class="settings-divider"></div>
+
+            <div class="settings-row">
+              <span class="settings-row-title">Session</span>
+              <span id="rec-session-display" class="rec-session-name">—</span>
+            </div>
+
+            <div class="settings-divider"></div>
+
+            <div class="rec-counts-grid">
+              <div class="rec-count-cell" id="rec-gnss-cell">
+                <span class="rec-count-value" id="rec-gnss-count">0</span>
+                <span class="rec-count-label">GNSS samples</span>
+              </div>
+              <div class="rec-count-cell" id="rec-imu-cell">
+                <span class="rec-count-value" id="rec-imu-count">0</span>
+                <span class="rec-count-label">IMU samples</span>
+              </div>
+              <div class="rec-count-cell" id="rec-sys-cell">
+                <span class="rec-count-value" id="rec-event-count">0</span>
+                <span class="rec-count-label">System events</span>
+              </div>
+            </div>
+
+            <div class="settings-divider"></div>
+
+            <div class="rec-action-row">
+              <button class="rec-stop-btn" onclick="Record.stop()">
+                &#x23F9; Stop Recording
+              </button>
+            </div>
+
+          </div>
+        </div><!-- /rec-active-panel -->
+
+      </div><!-- /record-left -->
+
+      <!-- Right column: past sessions -->
+      <div class="record-right">
+        <div class="section-label">
+          PAST SESSIONS
+          <button class="rec-refresh-btn" onclick="Record.loadSessions()" title="Refresh">&#x21BA;</button>
+        </div>
+        <div class="settings-card rec-sessions-card">
+          <div id="rec-sessions-list">
+            <span class="rec-no-sessions">No sessions yet</span>
+          </div>
+        </div>
+      </div><!-- /record-right -->
+
+    </div><!-- /record-layout -->
+
+  </div><!-- /screen-record -->
+
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
   <!-- BOTTOM NAVIGATION                                                  -->
   <!-- ══════════════════════════════════════════════════════════════════ -->
   <nav id="nav-bar">
@@ -477,6 +647,9 @@
     </button>
     <button class="nav-btn" data-screen="settings" onclick="Nav.go('settings')">
       Settings
+    </button>
+    <button class="nav-btn" data-screen="record" onclick="Nav.go('record')">
+      &#x23FA; Record
     </button>
     <button class="nav-btn exit-btn" onclick="ExitDialog.show()">
       &#x23FB; Exit
@@ -606,6 +779,7 @@
 <script src="/src/controls.js"></script>
 <script src="/src/settings.js"></script>
 <script src="/src/gps.js"></script>
+<script src="/src/record.js"></script>
 <script src="/src/app.js"></script>
 
 <!-- Map module last (uses ES module imports for Three.js) -->

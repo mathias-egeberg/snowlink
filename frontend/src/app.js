@@ -52,6 +52,7 @@ window.addEventListener('beforeunload', stopStatePolling);
     { key: 'map',  gpsId: 'map-gps-text'  },
     { key: 'ctrl', gpsId: 'ctrl-gps-text' },
     { key: 'set',  gpsId: 'set-gps-text'  },
+    { key: 'rec',  gpsId: 'rec-gps-text'  },
   ];
 
   function _signalLevel(s) {

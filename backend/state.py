@@ -88,6 +88,17 @@ class AppState:
     lidar_available: bool = False
     lidar_point_count: int = 0
 
+    # ── Recording ─────────────────────────────────────────────────────────
+    recording_active: bool = False
+    recording_session: str = ""
+    recording_started_at_ms: int = 0
+    recording_gnss_count: int = 0
+    recording_imu_count: int = 0
+    recording_event_count: int = 0
+    recording_log_gnss: bool = True
+    recording_log_imu: bool = True
+    recording_log_system: bool = True
+
 
 _DEVICE_LABELS = {
     "heat_roof_on": "Roof heater",
