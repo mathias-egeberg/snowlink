@@ -304,7 +304,12 @@ input, textarea, select {
 }
 .exit-dialog-actions {
   display: flex;
-  gap: 12px;
+  flex-direction: column;
+  gap: 10px;
+}
+.exit-dialog-row {
+  display: flex;
+  gap: 10px;
 }
 .exit-dialog-btn {
   flex: 1;
@@ -319,6 +324,12 @@ input, textarea, select {
 .exit-dialog-btn.cancel {
   background: var(--card);
   color: var(--text-sec);
+}
+.exit-dialog-btn.minimize {
+  background: var(--card);
+  color: var(--accent);
+  border: 1px solid rgba(0, 180, 216, 0.3);
+  width: 100%;
 }
 .exit-dialog-btn.confirm {
   background: var(--danger);

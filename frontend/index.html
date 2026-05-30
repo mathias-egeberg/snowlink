@@ -767,8 +767,13 @@
     <div class="exit-dialog" onclick="event.stopPropagation()">
       <p class="exit-dialog-title">Shut down SnowLink?</p>
       <div class="exit-dialog-actions">
-        <button class="exit-dialog-btn cancel" onclick="ExitDialog.hide()">Cancel</button>
-        <button class="exit-dialog-btn confirm" onclick="ExitDialog.confirm()">Shut Down</button>
+        <button class="exit-dialog-btn minimize" onclick="ExitDialog.minimize()">
+          Minimize
+        </button>
+        <div class="exit-dialog-row">
+          <button class="exit-dialog-btn cancel" onclick="ExitDialog.hide()">Cancel</button>
+          <button class="exit-dialog-btn confirm" onclick="ExitDialog.confirm()">Shut Down</button>
+        </div>
       </div>
     </div>
   </div>

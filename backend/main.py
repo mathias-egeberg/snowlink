@@ -106,6 +106,17 @@ async def serve_index():
     return FileResponse(str(FRONTEND_DIR / "index.html"))
 
 
+@app.post("/api/minimize")
+async def minimize_app():
+    """Minimize the Chromium window on the Pi desktop using xdotool."""
+    import subprocess
+    try:
+        subprocess.Popen(["xdotool", "getactivewindow", "windowminimize"])
+    except Exception:
+        pass
+    return {"ok": True}
+
+
 @app.post("/api/exit")
 async def exit_app():
     """Gracefully shut down the backend (and with it the kiosk script kills Chromium)."""
