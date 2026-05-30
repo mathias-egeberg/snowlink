@@ -88,13 +88,15 @@ app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)),              name="
 
 # ── API routes ────────────────────────────────────────────────────────────────
 
-from backend.api.routes_state    import router as _state_router
-from backend.api.routes_settings import router as _settings_router
-from backend.api.routes_control  import router as _control_router
+from backend.api.routes_state     import router as _state_router
+from backend.api.routes_settings  import router as _settings_router
+from backend.api.routes_control   import router as _control_router
+from backend.api.routes_recording import router as _recording_router
 
-app.include_router(_state_router,    prefix="/api")
-app.include_router(_settings_router, prefix="/api")
-app.include_router(_control_router,  prefix="/api")
+app.include_router(_state_router,     prefix="/api")
+app.include_router(_settings_router,  prefix="/api")
+app.include_router(_control_router,   prefix="/api")
+app.include_router(_recording_router, prefix="/api")
 
 
 # ── SPA root ──────────────────────────────────────────────────────────────────

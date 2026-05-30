@@ -175,6 +175,17 @@ class GpsService:
             fix_quality=fq,
         )
 
+    # ── RTCM injection (called by NtripService) ───────────────────────────
+
+    def send_rtcm(self, data: bytes) -> None:
+        with self._lock:
+            ser = self._serial
+        if ser is not None and ser.is_open:
+            try:
+                ser.write(data)
+            except Exception:
+                log.debug("RTCM write to GPS failed")
+
     # ── Cleanup ───────────────────────────────────────────────────────────
 
     def stop(self) -> None:

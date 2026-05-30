@@ -42,6 +42,87 @@ function stopStatePolling() {
 
 window.addEventListener('beforeunload', stopStatePolling);
 
+// ── Scroll handler (touch + mouse) ────────────────────────────────────────
+// Pi touchscreens may send mouse events instead of touch events depending on
+// the driver (USB HID displays, evdev emulation, etc.).  We handle both.
+// _touchFired flag prevents double-scrolling when both APIs fire together.
+(function () {
+  const SEL = '.settings-scroll, .record-left, .record-right, .gps-overlay-content, .rec-sessions-card';
+  const THRESHOLD = 5;   // px of movement before scroll activates
+
+  let _el          = null;
+  let _startY      = 0;
+  let _lastY       = 0;
+  let _lastT       = 0;
+  let _vel         = 0;
+  let _active      = false;  // threshold crossed?
+  let _touchFired  = false;  // suppress mouse if touch already fired
+
+  function _begin(el, y) {
+    _el = el; _startY = _lastY = y;
+    _lastT = performance.now(); _vel = 0; _active = false;
+  }
+
+  function _update(y) {
+    if (!_el) return;
+    const now = performance.now();
+    const dy  = _lastY - y;
+    const dt  = now - _lastT;
+    if (!_active) {
+      if (Math.abs(y - _startY) < THRESHOLD) { _lastY = y; _lastT = now; return; }
+      _active = true;
+    }
+    if (dt > 0) _vel = dy / dt;
+    _lastY = y; _lastT = now;
+    _el.scrollTop += dy;
+  }
+
+  function _finish() {
+    if (!_el || !_active) { _el = null; return; }
+    const el = _el;
+    let   v  = _vel * 16;   // scale px/ms → px/frame at ~60fps
+    _el = null; _active = false;
+    (function coast() {
+      if (Math.abs(v) < 0.5) return;
+      el.scrollTop += v;
+      v *= 0.92;
+      requestAnimationFrame(coast);
+    })();
+  }
+
+  // ── Touch events ─────────────────────────────────────────────────────────
+  document.addEventListener('touchstart', e => {
+    _touchFired = true;
+    setTimeout(() => { _touchFired = false; }, 500);
+    const el = e.touches.length ? e.target.closest(SEL) : null;
+    if (el) _begin(el, e.touches[0].clientY); else _el = null;
+  }, { passive: true });
+
+  document.addEventListener('touchmove', e => {
+    if (e.touches.length) _update(e.touches[0].clientY);
+  }, { passive: true });
+
+  document.addEventListener('touchend',    _finish,                          { passive: true });
+  document.addEventListener('touchcancel', () => { _el = null; },            { passive: true });
+
+  // ── Mouse events (Pi displays that emulate mouse via USB HID / evdev) ────
+  document.addEventListener('mousedown', e => {
+    if (_touchFired || e.button !== 0) return;
+    const el = e.target.closest(SEL);
+    if (el) _begin(el, e.clientY); else _el = null;
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (_touchFired) return;
+    if (!(e.buttons & 1)) { _el = null; return; }
+    _update(e.clientY);
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!_touchFired) _finish();
+  });
+})();
+
 // ── Centralised header indicator updates ──────────────────────────────────
 // Update every conn-indicator and GPS badge on every screen on every state
 // tick, regardless of which screen is active.  Each screen module may also
@@ -52,6 +133,7 @@ window.addEventListener('beforeunload', stopStatePolling);
     { key: 'map',  gpsId: 'map-gps-text'  },
     { key: 'ctrl', gpsId: 'ctrl-gps-text' },
     { key: 'set',  gpsId: 'set-gps-text'  },
+    { key: 'rec',  gpsId: 'rec-gps-text'  },
   ];
 
   function _signalLevel(s) {
