@@ -559,7 +559,7 @@
 
             <div class="rec-action-row">
               <button id="rec-start-btn" class="rec-start-btn" onclick="Record.start()">
-                &#x23FA; Start Recording
+                Start Recording
               </button>
             </div>
 
@@ -605,7 +605,7 @@
 
             <div class="rec-action-row">
               <button class="rec-stop-btn" onclick="Record.stop()">
-                &#x23F9; Stop Recording
+                Stop Recording
               </button>
             </div>
 
@@ -649,7 +649,7 @@
       Settings
     </button>
     <button class="nav-btn" data-screen="record" onclick="Nav.go('record')">
-      &#x23FA; Record
+      Record
     </button>
     <button class="nav-btn exit-btn" onclick="ExitDialog.show()">
       &#x23FB; Exit
@@ -757,6 +757,11 @@
   </div><!-- /gps-overlay -->
 
 
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- ON-SCREEN KEYBOARD (z-index 600)                                   -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <div id="osk-container" class="osk-container hidden" aria-label="On-screen keyboard" role="dialog"></div>
+
   <!-- Exit confirmation dialog -->
   <div id="exit-overlay" class="exit-overlay hidden" onclick="ExitDialog.hide()">
     <div class="exit-dialog" onclick="event.stopPropagation()">
@@ -780,6 +785,7 @@
 <script src="/src/settings.js"></script>
 <script src="/src/gps.js"></script>
 <script src="/src/record.js"></script>
+<script src="/src/keyboard.js"></script>
 <script src="/src/app.js"></script>
 
 <!-- Map module last (uses ES module imports for Three.js) -->
