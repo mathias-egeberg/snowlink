@@ -455,7 +455,7 @@ input, textarea, select {
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
-  touch-action: pan-y;
+  touch-action: none;
   overscroll-behavior-y: contain;
   padding: 20px 24px 24px;
   display: flex;
@@ -694,19 +694,18 @@ input, textarea, select {
 
 .gps-overlay-content {
   flex: 1;
-  overflow-y: auto;
+  overflow-y: scroll;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  touch-action: none;
+  overscroll-behavior-y: contain;
   padding: 20px 24px 24px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
-.gps-overlay-content::-webkit-scrollbar { width: 4px; }
-.gps-overlay-content::-webkit-scrollbar-thumb {
-  background: rgba(0, 180, 216, 0.3);
-  border-radius: 2px;
-}
+.gps-overlay-content::-webkit-scrollbar { display: none; }
 
 /* ── GPS status banner ────────────────────────────────────────────── */
 .gps-banner {
@@ -807,7 +806,7 @@ input, textarea, select {
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
-  touch-action: pan-y;
+  touch-action: none;
   overscroll-behavior-y: contain;
   display: flex;
   flex-direction: column;

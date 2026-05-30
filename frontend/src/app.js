@@ -42,9 +42,10 @@ function stopStatePolling() {
 
 window.addEventListener('beforeunload', stopStatePolling);
 
-// ── JS touch-scroll for overflow containers ───────────────────────────────
-// Belt-and-suspenders: drives scrollTop directly so Pi's Chromium kiosk
-// cannot ignore the gesture regardless of its touch-action interpretation.
+// ── Pointer-event scroll for overflow containers ──────────────────────────
+// Uses PointerEvents + setPointerCapture so all move events are routed to
+// the scroll element regardless of where the finger travels.  CSS sets
+// touch-action:none on these containers so the browser does not interfere.
 (function () {
   const SELECTORS = [
     '.settings-scroll',
@@ -55,28 +56,62 @@ window.addEventListener('beforeunload', stopStatePolling);
   ];
 
   function _enable(el) {
-    if (el._jsTouchScroll) return;
-    el._jsTouchScroll = true;
+    if (el._ptrScroll) return;
+    el._ptrScroll = true;
 
-    let startY = 0, startTop = 0, tracking = false;
+    let ptId     = null;
+    let startY   = 0;
+    let startTop = 0;
+    let lastY    = 0;
+    let lastT    = 0;
+    let vel      = 0;   // px / ms
+    let rafId    = null;
 
-    el.addEventListener('touchstart', e => {
-      if (e.touches.length !== 1) return;
-      startY   = e.touches[0].clientY;
+    el.addEventListener('pointerdown', e => {
+      if (e.pointerType === 'mouse') return;   // let wheel handle mouse
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+      ptId     = e.pointerId;
+      startY   = lastY = e.clientY;
       startTop = el.scrollTop;
-      tracking = true;
-    }, { passive: true });
+      lastT    = performance.now();
+      vel      = 0;
+      el.setPointerCapture(e.pointerId);
+    });
 
-    el.addEventListener('touchmove', e => {
-      if (!tracking || e.touches.length !== 1) return;
-      el.scrollTop = startTop + (startY - e.touches[0].clientY);
-    }, { passive: true });
+    el.addEventListener('pointermove', e => {
+      if (e.pointerId !== ptId) return;
+      const now = performance.now();
+      const dt  = now - lastT;
+      if (dt > 0) vel = (lastY - e.clientY) / dt;
+      lastY = e.clientY;
+      lastT = now;
+      el.scrollTop = startTop + (startY - e.clientY);
+    });
 
-    el.addEventListener('touchend',    () => { tracking = false; }, { passive: true });
-    el.addEventListener('touchcancel', () => { tracking = false }, { passive: true });
+    function _coast() {
+      if (Math.abs(vel) < 0.05) { rafId = null; return; }
+      el.scrollTop += vel * 16;   // ~60 fps frame
+      vel *= 0.92;                // damping factor
+      rafId = requestAnimationFrame(_coast);
+    }
+
+    el.addEventListener('pointerup', e => {
+      if (e.pointerId !== ptId) return;
+      ptId  = null;
+      rafId = requestAnimationFrame(_coast);
+    });
+
+    el.addEventListener('pointercancel', e => {
+      if (e.pointerId !== ptId) return;
+      ptId = null; vel = 0;
+    });
+
+    el.addEventListener('lostpointercapture', e => {
+      if (e.pointerId !== ptId) return;
+      ptId = null;
+    });
   }
 
-  // Apply now and whenever the screen changes (Record panels may be hidden on boot)
   function _applyAll() {
     SELECTORS.forEach(sel => document.querySelectorAll(sel).forEach(_enable));
   }
