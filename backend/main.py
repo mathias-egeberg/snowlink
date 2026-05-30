@@ -108,12 +108,33 @@ async def serve_index():
 
 @app.post("/api/minimize")
 async def minimize_app():
-    """Minimize the Chromium window on the Pi desktop using xdotool."""
+    """Minimize the Chromium window on the Pi desktop.
+
+    Pi OS Bookworm uses Wayland (labwc / wayfire) so wlrctl is tried first.
+    xdotool is kept as a fallback for X11 setups.
+    Both need the display env vars that may be absent in a service context.
+    """
     import subprocess
-    try:
-        subprocess.Popen(["xdotool", "getactivewindow", "windowminimize"])
-    except Exception:
-        pass
+
+    env = dict(os.environ)
+    env.setdefault("WAYLAND_DISPLAY", "wayland-0")
+    env.setdefault("DISPLAY", ":0")
+    env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+
+    for cmd in [
+        # Wayland / wlroots compositors (labwc, wayfire — Pi OS Bookworm)
+        ["wlrctl", "window", "minimize"],
+        # X11 fallback
+        ["xdotool", "search", "--class", "chromium", "windowminimize"],
+        ["xdotool", "search", "--class", "Chromium", "windowminimize"],
+    ]:
+        try:
+            r = subprocess.run(cmd, env=env, capture_output=True, timeout=3)
+            if r.returncode == 0:
+                break
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+
     return {"ok": True}
 
 
