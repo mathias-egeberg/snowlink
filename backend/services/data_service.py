@@ -51,6 +51,9 @@ class DataService:
         from backend.services.gps_service import GpsService
         self._gps_service = GpsService(self)
 
+        from backend.services.ntrip_service import NtripService
+        self._ntrip_service = NtripService(self, self._gps_service)
+
         threading.Thread(target=self._cellular_loop, daemon=True, name="cellular-loop").start()
         threading.Thread(target=self._boot_report,   daemon=True, name="boot-report").start()
 
@@ -227,3 +230,5 @@ class DataService:
             self._imu_service.stop()
         if hasattr(self, '_gps_service'):
             self._gps_service.stop()
+        if hasattr(self, '_ntrip_service'):
+            self._ntrip_service.stop()
