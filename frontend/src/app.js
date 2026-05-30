@@ -42,82 +42,61 @@ function stopStatePolling() {
 
 window.addEventListener('beforeunload', stopStatePolling);
 
-// ── Pointer-event scroll for overflow containers ──────────────────────────
-// Uses PointerEvents + setPointerCapture so all move events are routed to
-// the scroll element regardless of where the finger travels.  CSS sets
-// touch-action:none on these containers so the browser does not interfere.
+// ── Document-level touch scroll ───────────────────────────────────────────
+// Mirrors the pattern used by the working keyboard handler: document-level
+// touchstart/touchmove with e.target.closest() to find the scroll container.
+// This is proven to fire on the Pi because the keyboard uses the same API.
 (function () {
-  const SELECTORS = [
-    '.settings-scroll',
-    '.record-left',
-    '.record-right',
-    '.gps-overlay-content',
-    '.rec-sessions-card',
-  ];
+  const SEL = '.settings-scroll, .record-left, .record-right, .gps-overlay-content, .rec-sessions-card';
 
-  function _enable(el) {
-    if (el._ptrScroll) return;
-    el._ptrScroll = true;
+  let _el      = null;   // active scroll container
+  let _startY  = 0;
+  let _startT  = 0;
+  let _lastY   = 0;
+  let _lastT   = 0;
+  let _vel     = 0;      // px / ms
+  let _moved   = false;
 
-    let ptId     = null;
-    let startY   = 0;
-    let startTop = 0;
-    let lastY    = 0;
-    let lastT    = 0;
-    let vel      = 0;   // px / ms
-    let rafId    = null;
+  document.addEventListener('touchstart', e => {
+    if (!e.touches.length) return;
+    const el = e.target.closest(SEL);
+    if (!el) { _el = null; return; }
+    _el      = el;
+    _startY  = _lastY = e.touches[0].clientY;
+    _startT  = _lastT = performance.now();
+    _vel     = 0;
+    _moved   = false;
+  }, { passive: true });
 
-    el.addEventListener('pointerdown', e => {
-      if (e.pointerType === 'mouse') return;   // let wheel handle mouse
-      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-      ptId     = e.pointerId;
-      startY   = lastY = e.clientY;
-      startTop = el.scrollTop;
-      lastT    = performance.now();
-      vel      = 0;
-      el.setPointerCapture(e.pointerId);
-    });
+  document.addEventListener('touchmove', e => {
+    if (!_el || !e.touches.length) return;
+    const y   = e.touches[0].clientY;
+    const now = performance.now();
+    const dt  = now - _lastT;
+    if (dt > 0) _vel = (_lastY - y) / dt;
+    const dy = _lastY - y;
+    _lastY   = y;
+    _lastT   = now;
+    _el.scrollTop += dy;
+    _moved   = true;
+  }, { passive: true });
 
-    el.addEventListener('pointermove', e => {
-      if (e.pointerId !== ptId) return;
-      const now = performance.now();
-      const dt  = now - lastT;
-      if (dt > 0) vel = (lastY - e.clientY) / dt;
-      lastY = e.clientY;
-      lastT = now;
-      el.scrollTop = startTop + (startY - e.clientY);
-    });
+  document.addEventListener('touchend', () => {
+    if (!_el || !_moved) { _el = null; return; }
+    // Capture scroll target in closure so it persists during coast.
+    const el  = _el;
+    let   vel = _vel * 16;   // scale to ~px/frame at 60 fps
+    _el = null;
 
-    function _coast() {
-      if (Math.abs(vel) < 0.05) { rafId = null; return; }
-      el.scrollTop += vel * 16;   // ~60 fps frame
-      vel *= 0.92;                // damping factor
-      rafId = requestAnimationFrame(_coast);
-    }
+    (function coast() {
+      if (Math.abs(vel) < 0.5) return;
+      el.scrollTop += vel;
+      vel *= 0.92;
+      requestAnimationFrame(coast);
+    })();
+  }, { passive: true });
 
-    el.addEventListener('pointerup', e => {
-      if (e.pointerId !== ptId) return;
-      ptId  = null;
-      rafId = requestAnimationFrame(_coast);
-    });
-
-    el.addEventListener('pointercancel', e => {
-      if (e.pointerId !== ptId) return;
-      ptId = null; vel = 0;
-    });
-
-    el.addEventListener('lostpointercapture', e => {
-      if (e.pointerId !== ptId) return;
-      ptId = null;
-    });
-  }
-
-  function _applyAll() {
-    SELECTORS.forEach(sel => document.querySelectorAll(sel).forEach(_enable));
-  }
-
-  _applyAll();
-  document.addEventListener('screenchange', _applyAll);
+  document.addEventListener('touchcancel', () => { _el = null; }, { passive: true });
 })();
 
 // ── Centralised header indicator updates ──────────────────────────────────
