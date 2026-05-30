@@ -32,7 +32,7 @@ echo "[kiosk] Launching Chromium..."
 CHROMIUM_BIN=$(command -v chromium-browser || command -v chromium)
 export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
 $CHROMIUM_BIN \
-    --start-maximized \
+    --kiosk \
     --noerrdialogs \
     --disable-infobars \
     --disable-session-crashed-bubble \

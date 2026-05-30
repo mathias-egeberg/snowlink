@@ -304,12 +304,11 @@ input, textarea, select {
 }
 .exit-dialog-actions {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 .exit-dialog-btn {
-  width: 100%;
-  padding: 16px;
+  flex: 1;
+  padding: 14px;
   border: none;
   border-radius: var(--radius-sm);
   font-size: 15px;
@@ -317,10 +316,9 @@ input, textarea, select {
   cursor: pointer;
   touch-action: manipulation;
 }
-.exit-dialog-btn.minimize {
+.exit-dialog-btn.cancel {
   background: var(--card);
-  color: var(--accent);
-  border: 1px solid rgba(0, 180, 216, 0.3);
+  color: var(--text-sec);
 }
 .exit-dialog-btn.confirm {
   background: var(--danger);

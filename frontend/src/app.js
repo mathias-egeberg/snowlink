@@ -211,13 +211,6 @@ const ExitDialog = (() => {
   function show() { overlay().classList.remove('hidden'); }
   function hide() { overlay().classList.add('hidden'); }
 
-  async function minimize() {
-    hide();
-    try {
-      await fetch('/api/minimize', { method: 'POST' });
-    } catch (_) { /* ignore */ }
-  }
-
   async function confirm() {
     try {
       await fetch('/api/exit', { method: 'POST' });
@@ -227,5 +220,5 @@ const ExitDialog = (() => {
     window.close();
   }
 
-  return { show, hide, minimize, confirm };
+  return { show, hide, confirm };
 })();
