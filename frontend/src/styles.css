@@ -38,6 +38,12 @@ html, body {
   -webkit-user-select: none;
 }
 
+/* Input elements must be selectable even though body sets user-select:none */
+input, textarea, select {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* ── App shell ────────────────────────────────────────────────────── */
 #app {
   display: flex;
@@ -445,10 +451,12 @@ html, body {
 /* ── Settings screen ──────────────────────────────────────────────── */
 .settings-scroll {
   flex: 1;
-  overflow-y: auto;
+  overflow-y: scroll;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
+  touch-action: pan-y;
+  overscroll-behavior-y: contain;
   padding: 20px 24px 24px;
   display: flex;
   flex-direction: column;
@@ -795,10 +803,12 @@ html, body {
 .record-left,
 .record-right {
   padding: 16px 16px 16px 20px;
-  overflow-y: auto;
+  overflow-y: scroll;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
+  touch-action: pan-y;
+  overscroll-behavior-y: contain;
   display: flex;
   flex-direction: column;
   gap: 0;

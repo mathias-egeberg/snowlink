@@ -42,6 +42,49 @@ function stopStatePolling() {
 
 window.addEventListener('beforeunload', stopStatePolling);
 
+// ── JS touch-scroll for overflow containers ───────────────────────────────
+// Belt-and-suspenders: drives scrollTop directly so Pi's Chromium kiosk
+// cannot ignore the gesture regardless of its touch-action interpretation.
+(function () {
+  const SELECTORS = [
+    '.settings-scroll',
+    '.record-left',
+    '.record-right',
+    '.gps-overlay-content',
+    '.rec-sessions-card',
+  ];
+
+  function _enable(el) {
+    if (el._jsTouchScroll) return;
+    el._jsTouchScroll = true;
+
+    let startY = 0, startTop = 0, tracking = false;
+
+    el.addEventListener('touchstart', e => {
+      if (e.touches.length !== 1) return;
+      startY   = e.touches[0].clientY;
+      startTop = el.scrollTop;
+      tracking = true;
+    }, { passive: true });
+
+    el.addEventListener('touchmove', e => {
+      if (!tracking || e.touches.length !== 1) return;
+      el.scrollTop = startTop + (startY - e.touches[0].clientY);
+    }, { passive: true });
+
+    el.addEventListener('touchend',    () => { tracking = false; }, { passive: true });
+    el.addEventListener('touchcancel', () => { tracking = false }, { passive: true });
+  }
+
+  // Apply now and whenever the screen changes (Record panels may be hidden on boot)
+  function _applyAll() {
+    SELECTORS.forEach(sel => document.querySelectorAll(sel).forEach(_enable));
+  }
+
+  _applyAll();
+  document.addEventListener('screenchange', _applyAll);
+})();
+
 // ── Centralised header indicator updates ──────────────────────────────────
 // Update every conn-indicator and GPS badge on every screen on every state
 // tick, regardless of which screen is active.  Each screen module may also
