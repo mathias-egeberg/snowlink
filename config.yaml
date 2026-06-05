@@ -1,0 +1,23 @@
+# SnowLink hardware and recording configuration
+# This file controls IMU logging rates and port settings.
+# Auto-detection is used when port is empty.
+
+imu:
+  enabled: true
+  port: ""                # auto-detect if empty (recommended)
+  baudrate: 115200
+  raw_log_enabled: true
+  raw_log_rate_hz: 100    # increase to 200 when confirmed stable
+  heading_log_rate_hz: 10
+
+gnss:
+  baudrate: 115200        # ZED-F9P must be pre-configured to this baud in u-center
+  rate_hz: 20             # sent as UBX-CFG-RATE (50 ms period) on connect
+
+sftp:
+  enabled: true          # set to true to enable automatic upload after each session
+  host: "sftp.megeberg.no"                # e.g. files.example.com
+  port: 2022
+  username: "snowlink_user"
+  password: "snowlink_login"
+  remote_base_path: "/snowlink_data/logs"   # sessions are uploaded under YYYY-MM-DD/ sub-folders

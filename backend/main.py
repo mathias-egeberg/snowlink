@@ -71,6 +71,10 @@ async def _lifespan(app: FastAPI):
 
     task = asyncio.create_task(_broadcast_loop())
     log.info("SnowLink backend started")
+
+    from backend.services.sftp_service import SftpService
+    SftpService.get().upload_pending()
+
     try:
         yield
     finally:
