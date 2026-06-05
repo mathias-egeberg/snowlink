@@ -94,6 +94,7 @@ class AppState:
     recording_started_at_ms: int = 0
     recording_gnss_count: int = 0
     recording_imu_count: int = 0
+    recording_imu_raw_count: int = 0
     recording_event_count: int = 0
     recording_log_gnss: bool = True
     recording_log_imu: bool = True
