@@ -38,6 +38,20 @@ ASSETS_DIR = _ROOT / "assets"
 
 _ws_clients: set[WebSocket] = set()
 BROADCAST_INTERVAL_SECONDS = 0.05
+SNOW_GRID_BROADCAST_INTERVAL_SECONDS = 0.5
+
+
+async def _broadcast_to_clients(payload: str) -> None:
+    if not _ws_clients:
+        return
+    dead: set[WebSocket] = set()
+    for ws in list(_ws_clients):
+        try:
+            await ws.send_text(payload)
+        except Exception:
+            log.debug("WebSocket send failed", exc_info=True)
+            dead.add(ws)
+    _ws_clients.difference_update(dead)
 
 
 async def _broadcast_loop() -> None:
@@ -51,14 +65,34 @@ async def _broadcast_loop() -> None:
         except Exception:
             log.exception("WebSocket state snapshot failed")
             continue
-        dead: set[WebSocket] = set()
-        for ws in list(_ws_clients):
+        await _broadcast_to_clients(msg)
+
+
+async def _snow_grid_broadcast_loop() -> None:
+    """Forward snow-grid tile updates to WebSocket clients at ~2 Hz.
+
+    Each tile is sent as its own typed message so the frontend overlay
+    can update a single tile cheaply.  Imported lazily to avoid touching
+    the service module during early import (and tests).
+    """
+    from backend.services.snow_grid_service import SnowGridService
+    svc = SnowGridService.get()
+    while True:
+        await asyncio.sleep(SNOW_GRID_BROADCAST_INTERVAL_SECONDS)
+        if not _ws_clients:
+            continue
+        try:
+            messages = svc.collect_pending_messages()
+        except Exception:
+            log.exception("snow-grid collect failed")
+            continue
+        for tile_msg in messages:
             try:
-                await ws.send_text(msg)
+                payload = json.dumps(tile_msg)
             except Exception:
-                log.debug("WebSocket state send failed", exc_info=True)
-                dead.add(ws)
-        _ws_clients -= dead
+                log.exception("snow-grid serialize failed")
+                continue
+            await _broadcast_to_clients(payload)
 
 
 # ── App lifespan ──────────────────────────────────────────────────────────────
@@ -69,7 +103,8 @@ async def _lifespan(app: FastAPI):
     from backend.services.data_service import DataService
     _data_service = DataService.get()
 
-    task = asyncio.create_task(_broadcast_loop())
+    task            = asyncio.create_task(_broadcast_loop())
+    snow_grid_task  = asyncio.create_task(_snow_grid_broadcast_loop())
     log.info("SnowLink backend started")
 
     from backend.services.sftp_service import SftpService
@@ -79,6 +114,7 @@ async def _lifespan(app: FastAPI):
         yield
     finally:
         task.cancel()
+        snow_grid_task.cancel()
         _data_service.stop()
         log.info("SnowLink backend stopped")
 
@@ -92,15 +128,17 @@ app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)),              name="
 
 # ── API routes ────────────────────────────────────────────────────────────────
 
-from backend.api.routes_state     import router as _state_router
-from backend.api.routes_settings  import router as _settings_router
-from backend.api.routes_control   import router as _control_router
-from backend.api.routes_recording import router as _recording_router
+from backend.api.routes_state      import router as _state_router
+from backend.api.routes_settings   import router as _settings_router
+from backend.api.routes_control    import router as _control_router
+from backend.api.routes_recording  import router as _recording_router
+from backend.api.routes_snow_grid  import router as _snow_grid_router
 
 app.include_router(_state_router,     prefix="/api")
 app.include_router(_settings_router,  prefix="/api")
 app.include_router(_control_router,   prefix="/api")
 app.include_router(_recording_router, prefix="/api")
+app.include_router(_snow_grid_router, prefix="/api")
 
 
 # ── SPA root ──────────────────────────────────────────────────────────────────

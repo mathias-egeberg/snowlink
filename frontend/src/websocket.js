@@ -21,6 +21,17 @@ const WS = (() => {
     _ws.onmessage = (evt) => {
       try {
         const data = JSON.parse(evt.data);
+        // Typed messages (e.g. snow_tile_update) are routed to dedicated
+        // modules instead of overwriting the AppState snapshot.
+        if (data && typeof data.type === 'string') {
+          if (data.type === 'snow_tile_update' && window.SnowOverlay) {
+            window.SnowOverlay.handleMessage(data);
+            return;
+          }
+          // Fan-out for any other future typed messages.
+          document.dispatchEvent(new CustomEvent('ws-typed-message', { detail: data }));
+          return;
+        }
         AppState.update(data);
       } catch (e) {
         console.warn('[WS] bad message', e);

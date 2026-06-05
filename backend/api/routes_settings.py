@@ -61,6 +61,19 @@ async def post_settings(payload: dict = Body(...)) -> dict:
             elif isinstance(zero, (int, float)):
                 m["imu_yaw_zero_deg"] = float(zero) % 360.0
 
+    # ── Snow grid section ─────────────────────────────────────────────────
+    snow_in = payload.get("snow_grid")
+    if isinstance(snow_in, dict):
+        s = data.setdefault("snow_grid", {})
+        for bkey in ("enabled", "simulation_enabled"):
+            if isinstance(snow_in.get(bkey), bool):
+                s[bkey] = snow_in[bkey]
+        for fkey in ("tile_size_m", "cell_size_m"):
+            if isinstance(snow_in.get(fkey), (int, float)):
+                s[fkey] = float(snow_in[fkey])
+        if isinstance(snow_in.get("active_radius_tiles"), int):
+            s["active_radius_tiles"] = snow_in["active_radius_tiles"]
+
     SettingsService._validate_loaded_data(data)
     SettingsService.save()
 

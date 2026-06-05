@@ -316,6 +316,14 @@ function initMap(initialState) {
   });
 
   _map.on('load', () => {
+    // Attach the snow-depth overlay FIRST so its fill layer sits below
+    // the 3-D snowcat in MapLibre's layer stack (otherwise the flat
+    // ground-plane polygons would overdraw the model pixels).
+    if (window.SnowOverlay) {
+      try { window.SnowOverlay.attach(_map); }
+      catch (err) { console.error('[SnowOverlay] attach failed:', err); }
+    }
+
     _map.addLayer(snowcatLayer);
 
     // GPS dot fallback
@@ -330,12 +338,99 @@ function initMap(initialState) {
       .addTo(_map);
 
     setMarkerStyle(style);
+    _initSnowOverlayUi();
+
     _map.triggerRepaint();
   });
 
   // Inject the basemap toggle buttons into the map container.
   _injectBasemapToggle();
 }
+
+function _initSnowOverlayUi() {
+  const container = document.getElementById('map-container');
+  if (!container || container.querySelector('#snow-overlay-panel')) return;
+
+  const panel = document.createElement('div');
+  panel.id = 'snow-overlay-panel';
+  panel.style.cssText = [
+    'position:absolute', 'top:10px', 'left:10px', 'z-index:10',
+    'min-width:170px',
+    'background:rgba(13,24,41,0.88)', 'color:#e2e8f0',
+    'border:1.5px solid #00b4d8', 'border-radius:6px',
+    'padding:8px 10px', 'font:12px/1.35 sans-serif',
+    'user-select:none', 'pointer-events:auto',
+  ].join(';');
+
+  const header = document.createElement('div');
+  header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px';
+  const title = document.createElement('span');
+  title.textContent = 'Snow Depth';
+  title.style.cssText = 'font-weight:700;color:#00b4d8;letter-spacing:0.5px';
+  const toggle = document.createElement('button');
+  toggle.id = 'snow-overlay-toggle';
+  toggle.textContent = 'ON';
+  toggle.style.cssText = [
+    'background:#00b4d8', 'color:#0d1829', 'border:none',
+    'border-radius:4px', 'padding:3px 10px', 'font-weight:700',
+    'cursor:pointer', 'touch-action:manipulation',
+  ].join(';');
+  toggle.addEventListener('click', () => {
+    if (!window.SnowOverlay) return;
+    const next = !window.SnowOverlay.isVisible();
+    window.SnowOverlay.setVisible(next);
+    toggle.textContent = next ? 'ON' : 'OFF';
+    toggle.style.background = next ? '#00b4d8' : '#3a4961';
+    toggle.style.color      = next ? '#0d1829' : '#e2e8f0';
+  });
+  header.appendChild(title);
+  header.appendChild(toggle);
+
+  const body = document.createElement('div');
+  body.id = 'snow-overlay-status';
+  body.style.cssText = 'display:grid;grid-template-columns:auto 1fr;gap:2px 8px;color:#cbd5e1';
+  body.innerHTML = `
+    <span>Tiles:</span><span id="sov-tile-count">0</span>
+    <span>Tile:</span><span id="sov-tile-size">— m</span>
+    <span>Cell:</span><span id="sov-cell-size">— m</span>
+    <span>Sim:</span><span id="sov-sim">—</span>
+    <span>Updated:</span><span id="sov-age">never</span>
+  `;
+
+  panel.appendChild(header);
+  panel.appendChild(body);
+  container.appendChild(panel);
+
+  // Background config fetch (so we can show whether simulation is active).
+  let _simFlag = '—';
+  fetch('/api/snow-grid/config')
+    .then(r => r.ok ? r.json() : null)
+    .then(cfg => {
+      if (!cfg) return;
+      _simFlag = cfg.simulation_enabled ? 'yes' : 'no';
+      const el = document.getElementById('sov-sim');
+      if (el) el.textContent = _simFlag;
+    })
+    .catch(() => {});
+
+  // Live status tick.
+  if (_snowStatusTimer) clearInterval(_snowStatusTimer);
+  _snowStatusTimer = setInterval(() => {
+    if (!window.SnowOverlay) return;
+    const s = window.SnowOverlay.getStatus();
+    const tc = document.getElementById('sov-tile-count');
+    const ts = document.getElementById('sov-tile-size');
+    const cs = document.getElementById('sov-cell-size');
+    const ag = document.getElementById('sov-age');
+    if (tc) tc.textContent = String(s.tileCount);
+    if (ts) ts.textContent = s.tileSize != null ? `${s.tileSize} m` : '— m';
+    if (cs) cs.textContent = s.cellSize != null ? `${s.cellSize} m` : '— m';
+    if (ag) ag.textContent = s.lastUpdateAgeMs == null
+      ? 'never'
+      : `${(s.lastUpdateAgeMs / 1000).toFixed(1)}s ago`;
+  }, 500);
+}
+let _snowStatusTimer = null;
 
 function _injectBasemapToggle() {
   const container = document.getElementById('map-container');

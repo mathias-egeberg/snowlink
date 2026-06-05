@@ -27,6 +27,13 @@ _DEFAULTS: dict = {
         'imu_heading_enabled': False,
         'imu_yaw_zero_deg': None,
     },
+    'snow_grid': {
+        'enabled': True,                  # global on/off for the snow grid
+        'simulation_enabled': True,       # generate fake tiles around vehicle
+        'tile_size_m': 20.0,              # physical edge length of one tile
+        'cell_size_m': 0.5,               # edge length of one cell
+        'active_radius_tiles': 1,         # 1 -> 3x3, 2 -> 5x5
+    },
 }
 
 VALID_MARKER_STYLES = {'snowcat', 'dot'}
@@ -80,6 +87,8 @@ class SettingsService:
             data['ntrip'] = copy.deepcopy(_DEFAULTS['ntrip'])
         if not isinstance(data.get('map'), dict):
             data['map'] = copy.deepcopy(_DEFAULTS['map'])
+        if not isinstance(data.get('snow_grid'), dict):
+            data['snow_grid'] = copy.deepcopy(_DEFAULTS['snow_grid'])
 
         ntrip = data['ntrip']
         if not isinstance(ntrip.get('enabled'), bool):
@@ -96,8 +105,30 @@ class SettingsService:
 
         zero = map_settings.get('imu_yaw_zero_deg')
         if zero is None:
-            return
+            pass
+        else:
+            try:
+                map_settings['imu_yaw_zero_deg'] = float(zero) % 360.0
+            except (TypeError, ValueError):
+                map_settings['imu_yaw_zero_deg'] = _DEFAULTS['map']['imu_yaw_zero_deg']
+
+        snow = data['snow_grid']
+        if not isinstance(snow.get('enabled'), bool):
+            snow['enabled'] = _DEFAULTS['snow_grid']['enabled']
+        if not isinstance(snow.get('simulation_enabled'), bool):
+            snow['simulation_enabled'] = _DEFAULTS['snow_grid']['simulation_enabled']
         try:
-            map_settings['imu_yaw_zero_deg'] = float(zero) % 360.0
+            snow['tile_size_m'] = max(1.0, float(snow.get('tile_size_m',
+                                                          _DEFAULTS['snow_grid']['tile_size_m'])))
         except (TypeError, ValueError):
-            map_settings['imu_yaw_zero_deg'] = _DEFAULTS['map']['imu_yaw_zero_deg']
+            snow['tile_size_m'] = _DEFAULTS['snow_grid']['tile_size_m']
+        try:
+            snow['cell_size_m'] = max(0.05, float(snow.get('cell_size_m',
+                                                           _DEFAULTS['snow_grid']['cell_size_m'])))
+        except (TypeError, ValueError):
+            snow['cell_size_m'] = _DEFAULTS['snow_grid']['cell_size_m']
+        try:
+            snow['active_radius_tiles'] = max(0, int(snow.get('active_radius_tiles',
+                                                              _DEFAULTS['snow_grid']['active_radius_tiles'])))
+        except (TypeError, ValueError):
+            snow['active_radius_tiles'] = _DEFAULTS['snow_grid']['active_radius_tiles']

@@ -57,6 +57,12 @@ class DataService:
         threading.Thread(target=self._cellular_loop, daemon=True, name="cellular-loop").start()
         threading.Thread(target=self._boot_report,   daemon=True, name="boot-report").start()
 
+        # Start the simulated snow-depth grid service.  Real LiDAR ingestion
+        # will hook in here later; for now it produces simulated tiles around
+        # the current vehicle position.
+        from backend.services.snow_grid_service import SnowGridService
+        self._snow_grid_service = SnowGridService.get()
+
     # ── Simulation ────────────────────────────────────────────────────────
 
     def _sim_loop(self) -> None:
