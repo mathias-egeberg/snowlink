@@ -302,26 +302,38 @@ class SnowGridService:
             return
 
         snap = state_manager.get_snapshot()
+        gps_ok  = bool(snap.get("gps_ok") or snap.get("gps_float_rtk"))
         gps_lat = snap.get("gps_lat")
         gps_lon = snap.get("gps_lon")
+
+        # Only treat position as real when there is an actual fix.
+        # gps_lat/gps_lon always have non-None float defaults in AppState, so
+        # we must not rely on a None check — we must check gps_ok instead.
+        have_real_gps = gps_ok and gps_lat is not None and gps_lon is not None
 
         # Establish origin on first valid position.
         with self._lock:
             if self._origin_lat is None:
-                if gps_lat is None or gps_lon is None:
+                if not have_real_gps:
+                    # No fix yet → skip until we get a real position.
                     return
                 self._origin_lat = float(gps_lat)
                 self._origin_lon = float(gps_lon)
+                log.info(
+                    "snow grid origin set to %.6f, %.6f",
+                    self._origin_lat, self._origin_lon,
+                )
             origin_lat = self._origin_lat
             origin_lon = self._origin_lon
 
         # Compute vehicle position in local metres.
-        if gps_lat is not None and gps_lon is not None:
+        if have_real_gps:
             vx, vy = lat_lon_to_local_meters(
                 float(gps_lat), float(gps_lon), origin_lat, origin_lon,
             )
         else:
-            # Demo mode: slowly drift in a small circle around origin.
+            # Demo / no-fix mode: slowly drift in a small circle around origin
+            # so the UI stays interesting during bench testing.
             t = time.time() - self._sim_t0
             vx = 6.0 * math.sin(t * 0.05)
             vy = 6.0 * math.cos(t * 0.05)

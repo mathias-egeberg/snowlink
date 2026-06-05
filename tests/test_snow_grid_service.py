@@ -205,6 +205,35 @@ class SnowGridServiceTests(unittest.TestCase):
         self.assertFalse(cfg["has_origin"])
         self.assertEqual(svc.collect_pending_messages(), [])
 
+    def test_origin_not_set_when_gps_ok_false_even_with_default_float(self):
+        """gps_lat/gps_lon have non-None float defaults in AppState.
+
+        The old code checked ``if gps_lat is None`` which was never True,
+        so origin was incorrectly locked to the hardcoded default position.
+        The fix gates origin setting on gps_ok instead.
+        """
+        sgs.state_manager = StateManager()
+        # gps_lat / gps_lon are left at their AppState defaults (float, not None)
+        # but gps_ok is False — no real fix.
+        sgs.state_manager.update(gps_ok=False)
+        svc = _fresh_service()
+        svc.tick()
+        cfg = svc.get_config()
+        self.assertFalse(cfg["has_origin"],
+            "origin must NOT be set from the default float position when gps_ok=False")
+        self.assertEqual(svc.collect_pending_messages(), [])
+
+    def test_origin_set_when_gps_ok_true(self):
+        """When gps_ok becomes True the origin is locked to that position."""
+        sgs.state_manager = StateManager()
+        sgs.state_manager.update(gps_lat=61.234, gps_lon=8.456, gps_ok=True)
+        svc = _fresh_service()
+        svc.tick()
+        cfg = svc.get_config()
+        self.assertTrue(cfg["has_origin"])
+        self.assertAlmostEqual(cfg["origin_lat"], 61.234)
+        self.assertAlmostEqual(cfg["origin_lon"], 8.456)
+
     def test_tile_origin_geometry_round_trip(self):
         """A tile's reported (tile_x, tile_y) and its origin lat/lon let the
         frontend compute cell positions; verify they match the backend's
