@@ -201,6 +201,31 @@ def _fdfc_frame_len(message_type: int, message_len: int) -> Optional[int]:
     return None
 
 
+def parse_fdfc_euler_rpy(
+    payload: bytes,
+) -> "Optional[tuple[float, float, float]]":
+    """
+    Return (roll_rad, pitch_rad, yaw_rad) from an FDFC Euler frame payload
+    (frame[4:]), or None if the payload is malformed.
+
+    The N100 packs angles at _FDFC_EULER_PAYLOAD_OFFSET in the order
+    yaw, pitch, roll (radians, little-endian float32).
+    """
+    if len(payload) < _FDFC_EULER_PAYLOAD_OFFSET + 12:
+        return None
+    try:
+        yaw_rad, pitch_rad, roll_rad = struct.unpack_from(
+            "<fff",
+            payload,
+            _FDFC_EULER_PAYLOAD_OFFSET,
+        )
+    except struct.error:
+        return None
+    if not all(math.isfinite(v) for v in (yaw_rad, pitch_rad, roll_rad)):
+        return None
+    return roll_rad, pitch_rad, yaw_rad
+
+
 def _parse_fdfc_euler_yaw(payload: bytes) -> Optional[float]:
     if len(payload) < _FDFC_EULER_PAYLOAD_OFFSET + 12:
         return None

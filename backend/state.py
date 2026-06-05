@@ -61,6 +61,7 @@ class AppState:
     cellular_speed_test_error: str = ""
     gps_ok: bool = False
     gps_float_rtk: bool = False
+    gps_connected: bool = False
     gps_status_text: str = "No Fix"
     gps_lat: float = 60.0137563
     gps_lon: float = 11.0196226
@@ -75,6 +76,14 @@ class AppState:
     imu_yaw_valid: bool = False
     imu_heading_deg: float = 0.0
     imu_heading_calibrated: bool = False
+    imu_port: str = ""
+    imu_baudrate: int = 0
+    imu_accel_x: float = 0.0
+    imu_accel_y: float = 0.0
+    imu_accel_z: float = 0.0
+    imu_gyro_x: float = 0.0
+    imu_gyro_y: float = 0.0
+    imu_gyro_z: float = 0.0
 
     # ── NTRIP ─────────────────────────────────────────────────────────────
     ntrip_ok: bool = False
@@ -94,6 +103,7 @@ class AppState:
     recording_started_at_ms: int = 0
     recording_gnss_count: int = 0
     recording_imu_count: int = 0
+    recording_imu_raw_count: int = 0
     recording_event_count: int = 0
     recording_log_gnss: bool = True
     recording_log_imu: bool = True

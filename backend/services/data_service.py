@@ -159,9 +159,29 @@ class DataService:
     def clear_imu_yaw(self) -> None:
         state_manager.update(imu_yaw_valid=False)
 
-    def set_imu_connection(self, connected: bool) -> None:
+    def set_imu_raw(self, m) -> None:
+        state_manager.update(
+            imu_accel_x=round(m.accel_x, 4),
+            imu_accel_y=round(m.accel_y, 4),
+            imu_accel_z=round(m.accel_z, 4),
+            imu_gyro_x=round(m.gyro_x, 4),
+            imu_gyro_y=round(m.gyro_y, 4),
+            imu_gyro_z=round(m.gyro_z, 4),
+        )
+
+    def set_imu_connection(
+        self,
+        connected: bool,
+        port: str = "",
+        baudrate: int = 0,
+    ) -> None:
         prev_ok = state_manager.get_snapshot()['imu_ok']
-        state_manager.update(imu_ok=connected)
+        update_kwargs: dict = {"imu_ok": connected}
+        if port:
+            update_kwargs["imu_port"] = port
+        if baudrate:
+            update_kwargs["imu_baudrate"] = baudrate
+        state_manager.update(**update_kwargs)
         if not connected:
             self.clear_imu_yaw()
         if connected and not prev_ok:
@@ -182,11 +202,13 @@ class DataService:
         lon: float = 0.0,
         altitude_m: float = 0.0,
         fix_quality: int = 0,
+        connected: bool = True,
     ) -> None:
-        prev_ok = state_manager.get_snapshot()['gps_ok']
+        prev = state_manager.get_snapshot()
         state_manager.update(
             gps_ok=ok,
             gps_float_rtk=float_rtk,
+            gps_connected=connected,
             gps_status_text=status_text,
             gps_satellites=satellites,
             gps_hdop=hdop,
@@ -195,9 +217,9 @@ class DataService:
             gps_altitude_m=altitude_m,
             gps_fix_quality=fix_quality,
         )
-        if ok and not prev_ok:
+        if connected and not prev['gps_connected']:
             state_manager.update(last_event="GPS connected")
-        elif not ok and prev_ok:
+        elif not connected and prev['gps_connected']:
             state_manager.update(last_event="GPS disconnected")
 
     # ── IMU calibration ───────────────────────────────────────────────────
