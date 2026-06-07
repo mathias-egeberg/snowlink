@@ -165,6 +165,9 @@ class ImuService:
         yaw_stale    = True
         yaw_confirmed = False  # True once we've logged a confirmed good baud
 
+        from backend.services.config_service import ConfigService
+        _imu_dt = 1.0 / max(1.0, ConfigService.get_imu().get("native_rate_hz", 100))
+
         try:
             while self._active and ser.is_open:
                 try:
@@ -208,7 +211,20 @@ class ImuService:
                 raw_samples, imu_raw_buf = extract_fdfc_imu_raw(
                     imu_raw_buf + chunk, t_mono, t_unix
                 )
-                _imu_raw.stat_frames_extracted += len(raw_samples)
+                n = len(raw_samples)
+                _imu_raw.stat_frames_extracted += n
+                if n > 0:
+                    _imu_raw.stat_raw_packets_received += 1
+                    if n > 1:
+                        # Distribute timestamps retroactively so each sample gets its
+                        # own estimated time.  sample[i] = t_packet - (N-1-i) * dt,
+                        # making the last sample's timestamp equal the receive time.
+                        _imu_raw.stat_repeated_ts_before_fix += n - 1
+                        _imu_raw.stat_ts_corrections_applied += 1
+                        for i, m in enumerate(raw_samples):
+                            offset = (n - 1 - i) * _imu_dt
+                            m.timestamp_monotonic = t_mono - offset
+                            m.timestamp_unix      = t_unix - offset
                 for m in raw_samples:
                     try:
                         imu_raw_queue.put_nowait(m)

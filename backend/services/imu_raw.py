@@ -101,6 +101,11 @@ stat_frames_extracted:    int = 0   # frames returned by extract_fdfc_imu_raw
 stat_frames_enqueued:     int = 0   # frames successfully put into imu_raw_queue
 stat_frames_dropped_full: int = 0   # frames lost because queue was full
 
+# Timestamp interpolation stats (updated by imu_service._reader)
+stat_raw_packets_received:   int = 0  # serial read events that yielded ≥1 sample
+stat_repeated_ts_before_fix: int = 0  # samples that shared a receive timestamp
+stat_ts_corrections_applied: int = 0  # packets where N>1 samples were redistributed
+
 # Auto-detected layout for raw IMU within 0x41 payload.
 # None  = not yet probed
 # (-1,-1) = confirmed absent (no gravity-magnitude match found)
@@ -114,13 +119,27 @@ def reset_diagnostics() -> None:
     """Reset per-session diagnostics. Call from RecordingService.start()."""
     global _euler_raw_offsets, _euler_detect_attempts
     global stat_frames_extracted, stat_frames_enqueued, stat_frames_dropped_full
+    global stat_raw_packets_received, stat_repeated_ts_before_fix, stat_ts_corrections_applied
     _frame_type_counts.clear()
     _first_frame_bytes.clear()
     _euler_raw_offsets = None
     _euler_detect_attempts = 0
-    stat_frames_extracted    = 0
-    stat_frames_enqueued     = 0
-    stat_frames_dropped_full = 0
+    stat_frames_extracted         = 0
+    stat_frames_enqueued          = 0
+    stat_frames_dropped_full      = 0
+    stat_raw_packets_received     = 0
+    stat_repeated_ts_before_fix   = 0
+    stat_ts_corrections_applied   = 0
+
+
+def build_timestamp_interpolation_report() -> str:
+    """Timestamp interpolation diagnostics for system_status.csv."""
+    return (
+        f"raw_packets_received={stat_raw_packets_received} "
+        f"repeated_timestamps_before_fix={stat_repeated_ts_before_fix} "
+        f"timestamp_interpolation_enabled=True "
+        f"timestamp_corrections_applied={stat_ts_corrections_applied}"
+    )
 
 
 def build_frame_type_report() -> str:
