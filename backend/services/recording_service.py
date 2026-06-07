@@ -87,6 +87,9 @@ class RecordingService:
         self._imu_raw_flush_count = 0
         self._event_count         = 0
         self._gap_warnings        = 0
+        self._max_raw_imu_dt      = 0.0
+        self._mean_raw_imu_dt     = 0.0
+        self._ts_mono_fixes       = 0
 
         # Always-running drain thread writes imu_raw_queue to CSV while recording.
         threading.Thread(
@@ -135,8 +138,9 @@ class RecordingService:
                     "timestamp_monotonic", "timestamp_unix",
                     "lat", "lon", "altitude_m",
                     "fix_quality", "rtk_status",
-                    "h_acc_m", "v_acc_m",   # blank — not in NMEA GGA
+                    "h_acc_m", "v_acc_m",
                     "num_satellites", "hdop",
+                    "acc_source",
                 ])
 
             if "imu" in self._streams:
@@ -199,6 +203,7 @@ class RecordingService:
                     f"GNSS CONFIG: port={gnss_port_cfg} "
                     f"baud={cfg_gnss.get('baudrate', 115200)} "
                     f"log_rate_hz={cfg_gnss.get('log_rate_hz', 1)} "
+                    f"protocol={cfg_gnss.get('protocol', 'auto')} "
                     "(ZED-F9P output rate configured externally in u-center2)",
                 )
 
@@ -256,6 +261,9 @@ class RecordingService:
             imu_raw_count       = self._imu_raw_count
             imu_raw_flush_count = self._imu_raw_flush_count
             gap_warnings        = self._gap_warnings
+            max_raw_imu_dt      = self._max_raw_imu_dt
+            mean_raw_imu_dt     = self._mean_raw_imu_dt
+            ts_mono_fixes       = self._ts_mono_fixes
 
         raw_hz  = imu_raw_count / elapsed if elapsed > 0 else 0.0
         head_hz = imu_count     / elapsed if elapsed > 0 else 0.0
@@ -263,6 +271,7 @@ class RecordingService:
 
         from backend.services.imu_raw import (
             build_frame_type_report, build_frame_hex_report, build_raw_queue_stats,
+            build_timestamp_interpolation_report,
         )
         from backend.services.imu_service import connected_port, connected_baud
         from backend.services.gps_service import build_gnss_diagnostic_report
@@ -289,6 +298,15 @@ class RecordingService:
             f"raw_frames_written={imu_raw_count} "
             f"raw_queue_remaining_at_stop={raw_queue_remaining} "
             f"raw_writer_flush_count={imu_raw_flush_count}",
+        )
+        self._write_sys_event(
+            "INFO",
+            f"IMU TIMESTAMP QUALITY: "
+            f"{build_timestamp_interpolation_report()} "
+            f"raw_samples_written={imu_raw_count} "
+            f"max_raw_imu_dt={max_raw_imu_dt:.4f}s "
+            f"mean_raw_imu_dt={mean_raw_imu_dt:.4f}s "
+            f"timestamp_monotonicity_fixes={ts_mono_fixes}",
         )
         self._write_sys_event(
             "INFO",
@@ -418,9 +436,13 @@ class RecordingService:
         prev_t_mono: Optional[float] = None
         was_active  = False
 
-        raw_written  = 0
-        flush_count  = 0
-        gap_warnings = 0
+        raw_written   = 0
+        flush_count   = 0
+        gap_warnings  = 0
+        dt_max        = 0.0
+        dt_sum        = 0.0
+        dt_count      = 0
+        ts_mono_fixes = 0
 
         window_samples  = 0
         window_start    = time.monotonic()
@@ -442,6 +464,10 @@ class RecordingService:
                 raw_written     = 0
                 flush_count     = 0
                 gap_warnings    = 0
+                dt_max          = 0.0
+                dt_sum          = 0.0
+                dt_count        = 0
+                ts_mono_fixes   = 0
                 prev_t_mono     = None
                 window_samples  = 0
                 window_start    = time.monotonic()
@@ -452,11 +478,31 @@ class RecordingService:
             if writer is None:
                 continue
 
-            # Timing gap detection — only flag genuine stalls (> 1 s), not
-            # normal chunk-level grouping where many frames share one t_mono.
-            if prev_t_mono is not None and m.timestamp_monotonic - prev_t_mono > 1.0:
-                gap_warnings += 1
-            prev_t_mono = m.timestamp_monotonic
+            # Determine write timestamps; enforce monotonicity.
+            t_write_mono = m.timestamp_monotonic
+            t_write_unix = m.timestamp_unix
+
+            if prev_t_mono is not None:
+                dt = t_write_mono - prev_t_mono
+                if dt <= 0.0:
+                    # Non-monotonic after interpolation — push forward by 1 µs
+                    correction = prev_t_mono + 1e-6 - t_write_mono
+                    t_write_mono = prev_t_mono + 1e-6
+                    t_write_unix = m.timestamp_unix + correction
+                    ts_mono_fixes += 1
+                    log.warning(
+                        "IMU raw: non-monotonic timestamp corrected "
+                        "(dt=%.6f s at sample %d)", dt, raw_written + 1,
+                    )
+                else:
+                    if dt > dt_max:
+                        dt_max = dt
+                    dt_sum   += dt
+                    dt_count += 1
+                    if dt > 1.0:
+                        gap_warnings += 1
+
+            prev_t_mono = t_write_mono
 
             # Write every frame — no downsampling
             roll_s  = f"{m.roll:.6f}"  if m.roll  is not None else ""
@@ -466,7 +512,7 @@ class RecordingService:
             with self._lock:
                 if self._imu_raw_writer:
                     self._imu_raw_writer.writerow([
-                        f"{m.timestamp_monotonic:.6f}", f"{m.timestamp_unix:.6f}",
+                        f"{t_write_mono:.6f}", f"{t_write_unix:.6f}",
                         f"{m.accel_x:.6f}", f"{m.accel_y:.6f}", f"{m.accel_z:.6f}",
                         f"{m.gyro_x:.6f}",  f"{m.gyro_y:.6f}",  f"{m.gyro_z:.6f}",
                         roll_s, pitch_s, yaw_s,
@@ -477,8 +523,11 @@ class RecordingService:
                         self._imu_raw_file.flush()
                         flush_count += 1
                         self._imu_raw_flush_count = flush_count
-                    self._imu_raw_count = raw_written
-                    self._gap_warnings  = gap_warnings
+                    self._imu_raw_count   = raw_written
+                    self._gap_warnings    = gap_warnings
+                    self._max_raw_imu_dt  = dt_max
+                    self._mean_raw_imu_dt = dt_sum / dt_count if dt_count > 0 else 0.0
+                    self._ts_mono_fixes   = ts_mono_fixes
             window_samples += 1
 
             # Frequency check every 5 s — uses written count, no undefined vars
@@ -545,10 +594,11 @@ class RecordingService:
                                     f"{m.altitude_m:.3f}",
                                     m.fix_quality,
                                     m.fix_type_text,
-                                    "",   # h_acc_m — not in NMEA GGA
-                                    "",   # v_acc_m — not in NMEA GGA
+                                    f"{m.h_acc_m:.4f}" if m.h_acc_m is not None else "",
+                                    f"{m.v_acc_m:.4f}" if m.v_acc_m is not None else "",
                                     m.satellites,
                                     f"{m.hdop:.2f}",
+                                    m.acc_source,
                                 ])
                                 self._gnss_file.flush()
                         gnss_count += 1
