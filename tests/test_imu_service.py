@@ -103,7 +103,9 @@ class ImuServiceConfigTest(unittest.TestCase):
         serial.is_open = False  # simulate reader already exited
         service = _service_for_test(data_service, serial)
 
-        with patch.object(imu_service.imu_selftest, 'find_port', return_value=None):
+        # Patch _resolve_port directly so the test is independent of config.yaml
+        # and the actual USB bus state (explicit port or auto-detect).
+        with patch.object(service, '_resolve_port', return_value=(None, None)):
             service._tick()
 
         self.assertEqual(data_service.connections, [False])

@@ -60,7 +60,10 @@
       "Bash(venv/bin/python3 *)",
       "WebFetch(domain:maplibre.org)",
       "Bash(git *)",
-      "Bash(pip show *)"
+      "Bash(pip show *)",
+      "Bash(/home/mathias/snowlink/venv/bin/pip install *)",
+      "Bash(/home/mathias/snowlink/venv/bin/python -c \"import paramiko; print\\('paramiko', paramiko.__version__\\)\")",
+      "Bash(/home/mathias/snowlink/venv/bin/python *)"
     ]
   }
 }

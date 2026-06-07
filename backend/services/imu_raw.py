@@ -96,6 +96,11 @@ imu_raw_queue: queue.Queue["IMURawMeasurement"] = queue.Queue(maxsize=_QUEUE_MAX
 _frame_type_counts: Dict[str, int] = {}
 _first_frame_bytes: Dict[str, bytes] = {}   # first full frame per type
 
+# Producer-side queue stats (updated by imu_service._reader)
+stat_frames_extracted:    int = 0   # frames returned by extract_fdfc_imu_raw
+stat_frames_enqueued:     int = 0   # frames successfully put into imu_raw_queue
+stat_frames_dropped_full: int = 0   # frames lost because queue was full
+
 # Auto-detected layout for raw IMU within 0x41 payload.
 # None  = not yet probed
 # (-1,-1) = confirmed absent (no gravity-magnitude match found)
@@ -108,10 +113,14 @@ _EULER_DETECT_MAX = 200     # ~20 s at 10 Hz before giving up
 def reset_diagnostics() -> None:
     """Reset per-session diagnostics. Call from RecordingService.start()."""
     global _euler_raw_offsets, _euler_detect_attempts
+    global stat_frames_extracted, stat_frames_enqueued, stat_frames_dropped_full
     _frame_type_counts.clear()
     _first_frame_bytes.clear()
     _euler_raw_offsets = None
     _euler_detect_attempts = 0
+    stat_frames_extracted    = 0
+    stat_frames_enqueued     = 0
+    stat_frames_dropped_full = 0
 
 
 def build_frame_type_report() -> str:
@@ -119,6 +128,15 @@ def build_frame_type_report() -> str:
     if not _frame_type_counts:
         return "no_fdfc_frames_observed"
     return " ".join(f"{k}={v}" for k, v in sorted(_frame_type_counts.items()))
+
+
+def build_raw_queue_stats() -> dict:
+    """Return producer-side queue stats for session diagnostics."""
+    return {
+        "extracted":    stat_frames_extracted,
+        "enqueued":     stat_frames_enqueued,
+        "dropped_full": stat_frames_dropped_full,
+    }
 
 
 def build_frame_hex_report() -> str:

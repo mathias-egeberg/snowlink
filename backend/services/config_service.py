@@ -22,7 +22,20 @@ _DEFAULTS: Dict[str, Any] = {
         "baudrate": 115200,
         "raw_log_enabled": True,
         "raw_log_rate_hz": 100,
+        "native_rate_hz": 100,
         "heading_log_rate_hz": 10,
+    },
+    "gnss": {
+        "enabled": True,
+        "port": "",
+        "baudrate": 115200,
+        "log_rate_hz": 1,
+        "protocol": "auto",
+    },
+    "logging": {
+        "session_prefix": "test",
+        "write_system_status": True,
+        "flush_interval_sec": 1.0,
     },
     "sftp": {
         "enabled": False,
@@ -57,6 +70,10 @@ class ConfigService:
     @classmethod
     def get_imu(cls) -> Dict[str, Any]:
         return cls.load()["imu"]
+
+    @classmethod
+    def get_gnss(cls) -> Dict[str, Any]:
+        return cls.load()["gnss"]
 
     @classmethod
     def get_sftp(cls) -> Dict[str, Any]:

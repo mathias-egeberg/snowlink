@@ -1,21 +1,25 @@
 """
 Recording service — logs selected sensor streams to CSV files.
 
-Each session gets its own timestamped directory under logs/.
-Supported streams:
-  gnss    → gnss_raw.csv      (lat, lon, alt, fix, RTK, sats, HDOP)
-  imu     → imu_heading.csv   (yaw, heading, calibrated flag)   ~10 Hz
-            imu_raw.csv       (accel, gyro + optional rpy)       ~100 Hz
-  system  → system_status.csv (events + IMU diagnostics)
+Each session creates exactly one timestamped folder under logs/ and writes:
+  gnss_raw.csv      lat, lon, alt, fix, RTK, sats, HDOP         ~1 Hz
+  imu_heading.csv   yaw, heading, calibrated flag                ~10 Hz
+  imu_raw.csv       accel, gyro + optional roll/pitch/yaw        ~95-100 Hz
+  system_status.csv events + diagnostics from all sensors
 
-imu_raw.csv is intended for future ESKF GNSS/IMU fusion.
-imu_heading.csv remains the low-rate orientation/debug log.
+GNSS logging is event-driven: the GPS reader pushes GNSSMeasurement objects
+to gnss_queue; the recording loop drains it completely each tick.
+
+IMU raw logging is event-driven: the IMU reader pushes IMURawMeasurement
+objects to imu_raw_queue; a dedicated drain thread writes them to CSV.
+
+Both queues are drained of stale data at the start of each session so
+timestamp ranges are always consistent within a session folder.
 """
 from __future__ import annotations
 
 import csv
 import logging
-import math
 import queue
 import re
 import threading
@@ -30,8 +34,29 @@ log = logging.getLogger("snowlink.recording")
 
 _LOGS_DIR = Path(__file__).parent.parent.parent / "logs"
 
-_POLL_INTERVAL        = 0.1   # 10 Hz for heading / event polling
-_STATE_UPDATE_INTERVAL = 1.0  # How often to push counts to state_manager
+_POLL_INTERVAL         = 0.1   # 10 Hz main loop tick
+_STATE_UPDATE_INTERVAL = 1.0   # How often to push live counts to state_manager
+
+
+def _list_serial_devices() -> str:
+    import glob
+    lines = []
+    by_id = sorted(glob.glob("/dev/serial/by-id/*"))
+    if by_id:
+        lines.append("by-id: " + ", ".join(by_id))
+    tty = sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
+    if tty:
+        lines.append("tty: " + ", ".join(tty))
+    return "; ".join(lines) if lines else "none found"
+
+
+def _drain_queue(q: queue.Queue) -> None:
+    """Discard all items currently in q without blocking."""
+    try:
+        while True:
+            q.get_nowait()
+    except queue.Empty:
+        pass
 
 
 class RecordingService:
@@ -51,19 +76,19 @@ class RecordingService:
         self._session_dir: Optional[Path] = None
         self._session_start_t: float = 0.0
 
-        self._gnss_file = self._gnss_writer = None
-        self._imu_file  = self._imu_writer  = None
-        self._imu_raw_file = self._imu_raw_writer = None
-        self._sys_file  = self._sys_writer  = None
+        self._gnss_file      = self._gnss_writer      = None
+        self._imu_file       = self._imu_writer        = None
+        self._imu_raw_file   = self._imu_raw_writer    = None
+        self._sys_file       = self._sys_writer        = None
 
-        self._gnss_count     = 0
-        self._imu_count      = 0
-        self._imu_raw_count  = 0
-        self._event_count    = 0
-        self._gap_warnings   = 0
-        self._invalid_count  = 0
+        self._gnss_count          = 0
+        self._imu_count           = 0
+        self._imu_raw_count       = 0
+        self._imu_raw_flush_count = 0
+        self._event_count         = 0
+        self._gap_warnings        = 0
 
-        # Always-running drain thread flushes imu_raw_queue whether or not recording.
+        # Always-running drain thread writes imu_raw_queue to CSV while recording.
         threading.Thread(
             target=self._raw_imu_loop, daemon=True, name="imu-raw-drain"
         ).start()
@@ -72,9 +97,18 @@ class RecordingService:
 
     def start(self, session_name: str, streams: list[str]) -> dict:
         from backend.services.config_service import ConfigService
-        from backend.services.imu_raw import reset_diagnostics
-        cfg_imu = ConfigService.get_imu()
+        from backend.services.imu_raw import reset_diagnostics, imu_raw_queue
+        from backend.services.gps_service import reset_gnss_diagnostics, gnss_queue
+
+        cfg_imu  = ConfigService.get_imu()
+        cfg_gnss = ConfigService.get_gnss()
         reset_diagnostics()
+        reset_gnss_diagnostics()
+
+        # Drain stale sensor data from previous sessions so all CSV timestamps
+        # in this session start from the same point in time.
+        _drain_queue(gnss_queue)
+        _drain_queue(imu_raw_queue)
 
         with self._lock:
             if self._active:
@@ -85,15 +119,14 @@ class RecordingService:
             session_dir = _LOGS_DIR / dir_name
             session_dir.mkdir(parents=True, exist_ok=True)
 
-            self._streams     = set(streams)
-            self._session_dir = session_dir
+            self._streams         = set(streams)
+            self._session_dir     = session_dir
             self._session_start_t = time.monotonic()
-            self._gnss_count     = 0
-            self._imu_count      = 0
-            self._imu_raw_count  = 0
-            self._event_count    = 0
-            self._gap_warnings   = 0
-            self._invalid_count  = 0
+            self._gnss_count      = 0
+            self._imu_count       = 0
+            self._imu_raw_count   = 0
+            self._event_count     = 0
+            self._gap_warnings    = 0
 
             if "gnss" in self._streams:
                 self._gnss_file   = open(session_dir / "gnss_raw.csv", "w", newline="")
@@ -101,7 +134,9 @@ class RecordingService:
                 self._gnss_writer.writerow([
                     "timestamp_monotonic", "timestamp_unix",
                     "lat", "lon", "altitude_m",
-                    "fix_quality", "fix_type", "satellites", "hdop",
+                    "fix_quality", "rtk_status",
+                    "h_acc_m", "v_acc_m",   # blank — not in NMEA GGA
+                    "num_satellites", "hdop",
                 ])
 
             if "imu" in self._streams:
@@ -132,18 +167,40 @@ class RecordingService:
 
             self._active = True
 
-        # Log IMU config to system_status at recording start
-        if "system" in streams and "imu" in streams:
-            s = state_manager.get_snapshot()
-            port_str    = s.get("imu_port", "") or "auto"
-            baud_str    = str(s.get("imu_baudrate", 0) or cfg_imu.get("baudrate", 115200))
-            raw_enabled = cfg_imu.get("raw_log_enabled", True)
-            raw_rate    = cfg_imu.get("raw_log_rate_hz", 100)
-            self._write_sys_event(
-                "INFO",
-                f"IMU CONFIG: port={port_str} baud={baud_str} "
-                f"raw_enabled={raw_enabled} raw_rate_hz={raw_rate}",
-            )
+        # ── Startup diagnostics ───────────────────────────────────────────
+        if "system" in streams:
+            self._write_sys_event("INFO", f"SESSION: {dir_name}")
+            self._write_sys_event("INFO", f"SERIAL DEVICES: {_list_serial_devices()}")
+
+            imu_port_cfg  = cfg_imu.get("port",  "").strip() or "auto-detect"
+            gnss_port_cfg = cfg_gnss.get("port", "").strip() or "auto-detect"
+
+            # Warn on port collision
+            if (cfg_imu.get("port", "").strip()
+                    and cfg_gnss.get("port", "").strip()
+                    and cfg_imu["port"].strip() == cfg_gnss["port"].strip()):
+                self._write_sys_event(
+                    "WARN",
+                    f"PORT CONFLICT: IMU and GNSS both configured to {cfg_imu['port'].strip()}",
+                )
+
+            if "imu" in streams:
+                raw_enabled = cfg_imu.get("raw_log_enabled", True)
+                raw_rate    = cfg_imu.get("raw_log_rate_hz", 100)
+                self._write_sys_event(
+                    "INFO",
+                    f"IMU CONFIG: port={imu_port_cfg} raw_enabled={raw_enabled} "
+                    f"raw_rate_hz={raw_rate} (baud auto-detected via rotation)",
+                )
+
+            if "gnss" in streams:
+                self._write_sys_event(
+                    "INFO",
+                    f"GNSS CONFIG: port={gnss_port_cfg} "
+                    f"baud={cfg_gnss.get('baudrate', 115200)} "
+                    f"log_rate_hz={cfg_gnss.get('log_rate_hz', 1)} "
+                    "(ZED-F9P output rate configured externally in u-center2)",
+                )
 
         state_manager.update(
             recording_active=True,
@@ -165,73 +222,159 @@ class RecordingService:
         return {"ok": True, "session": dir_name}
 
     def stop(self) -> dict:
+        from backend.services.imu_raw import imu_raw_queue as _irq
+
+        # Phase 1: stop the main recording loop; start the shutdown drain window.
+        # The raw IMU drain thread is NOT gated on _active — it writes while
+        # self._imu_raw_writer is not None, so it keeps running here.
         with self._lock:
             if not self._active:
                 return {"ok": False, "error": "Not recording"}
             self._active = False
-            session       = self._session_dir.name if self._session_dir else ""
-            elapsed       = time.monotonic() - self._session_start_t
-            gnss_count    = self._gnss_count
-            imu_count     = self._imu_count
-            imu_raw_count = self._imu_raw_count
-            event_count   = self._event_count
-            gap_warnings  = self._gap_warnings
-            invalid_count = self._invalid_count
+            session  = self._session_dir.name if self._session_dir else ""
+            elapsed  = time.monotonic() - self._session_start_t
+            gnss_count  = self._gnss_count
+            imu_count   = self._imu_count
+            event_count = self._event_count
+
+        # Phase 2: wait for the drain thread to flush all remaining raw IMU frames.
+        drain_deadline = time.monotonic() + 3.0
+        while time.monotonic() < drain_deadline:
+            if _irq.empty():
+                break
+            time.sleep(0.005)
+        raw_queue_remaining = _irq.qsize()
+
+        # Phase 3: read final IMU raw counters (drain thread may have written more
+        # rows after Phase 1), then do a final flush before reading imu_raw_count.
+        with self._lock:
+            if self._imu_raw_file:
+                try:
+                    self._imu_raw_file.flush()
+                except Exception:
+                    pass
+            imu_raw_count       = self._imu_raw_count
+            imu_raw_flush_count = self._imu_raw_flush_count
+            gap_warnings        = self._gap_warnings
 
         raw_hz  = imu_raw_count / elapsed if elapsed > 0 else 0.0
-        head_hz = imu_count / elapsed if elapsed > 0 else 0.0
+        head_hz = imu_count     / elapsed if elapsed > 0 else 0.0
+        gnss_hz = gnss_count    / elapsed if elapsed > 0 else 0.0
 
         from backend.services.imu_raw import (
-            build_frame_type_report,
-            build_frame_hex_report,
+            build_frame_type_report, build_frame_hex_report, build_raw_queue_stats,
         )
+        from backend.services.imu_service import connected_port, connected_baud
+        from backend.services.gps_service import build_gnss_diagnostic_report
+
         frame_type_report = build_frame_type_report()
         frame_hex_report  = build_frame_hex_report()
+        gnss_diag         = build_gnss_diagnostic_report(elapsed)
+        queue_stats       = build_raw_queue_stats()
 
-        # Write frame type diagnostics first — essential for debugging missing raw data
-        self._write_sys_event("INFO", f"IMU FRAME TYPES: {frame_type_report}")
-        self._write_sys_event("INFO", f"IMU FRAME HEX: {frame_hex_report}")
+        raw_recv_hz = queue_stats["extracted"] / elapsed if elapsed > 0 else 0.0
 
-        # Write summary to system_status before closing files
+        # ── IMU diagnostics ───────────────────────────────────────────────
         self._write_sys_event(
             "INFO",
-            f"IMU SUMMARY: raw={imu_raw_count} (~{raw_hz:.1f}Hz) "
+            f"IMU CONNECTED: port={connected_port!r} baud={connected_baud}",
+        )
+        self._write_sys_event("INFO", f"IMU FRAME TYPES: {frame_type_report}")
+        self._write_sys_event("INFO", f"IMU FRAME HEX: {frame_hex_report}")
+        self._write_sys_event(
+            "INFO",
+            f"IMU RAW STATS: "
+            f"raw_frames_extracted={queue_stats['extracted']} "
+            f"raw_frames_enqueued={queue_stats['enqueued']} "
+            f"raw_frames_written={imu_raw_count} "
+            f"raw_queue_remaining_at_stop={raw_queue_remaining} "
+            f"raw_writer_flush_count={imu_raw_flush_count}",
+        )
+        self._write_sys_event(
+            "INFO",
+            f"IMU SUMMARY: "
+            f"raw_received={queue_stats['extracted']} (~{raw_recv_hz:.1f}Hz) "
+            f"raw_written={imu_raw_count} (~{raw_hz:.1f}Hz) "
             f"heading={imu_count} (~{head_hz:.1f}Hz) "
-            f"gaps={gap_warnings} invalid={invalid_count}",
+            f"timestamp_gaps={gap_warnings}",
         )
 
+        if imu_raw_count == 0 and imu_count > 0:
+            self._write_sys_event(
+                "WARN",
+                "IMU raw frames missing but heading frames present. "
+                "Check N100 output configuration — device may not be sending 0x40 raw frames. "
+                "Verify with: screen /dev/ttyUSB0 921600",
+            )
+        elif imu_raw_count == 0 and imu_count == 0:
+            self._write_sys_event(
+                "WARN",
+                "IMU: no data logged. Baud rotation may still be searching. "
+                "Check cable, port path, and that the N100 is powered.",
+            )
+        elif raw_hz < 80.0:
+            self._write_sys_event(
+                "WARN",
+                f"IMU raw rate low: {raw_hz:.1f}Hz (expected ~95-100Hz). "
+                "Check USB bandwidth and queue size.",
+            )
+
+        # ── GNSS diagnostics ──────────────────────────────────────────────
+        self._write_sys_event("INFO", f"GNSS SUMMARY: {gnss_diag}")
+        self._write_sys_event(
+            "INFO",
+            f"GNSS LOGGED: {gnss_count} rows (~{gnss_hz:.2f}Hz) over {elapsed:.1f}s",
+        )
+
+        expected_gnss = elapsed * 1.0
+        if gnss_count < expected_gnss * 0.8:
+            self._write_sys_event(
+                "WARN",
+                f"GNSS row count low ({gnss_count} vs ~{expected_gnss:.0f} expected). "
+                "Possible causes: (1) ZED-F9P output rate < 1Hz — check u-center2 GGA settings; "
+                "(2) Wrong baud rate — GNSS SUMMARY shows actual bytes received; "
+                "(3) GGA messages not enabled on this port.",
+            )
+
+        # Phase 4: close all files (sets _imu_raw_writer to None, which stops
+        # the drain thread from writing any further stale frames).
         with self._lock:
             self._close_files()
 
-        state_manager.update(
-            recording_active=False,
-            recording_session="",
-        )
+        state_manager.update(recording_active=False, recording_session="")
 
         summary = {
-            "imu_raw_count":      imu_raw_count,
-            "imu_raw_hz":         round(raw_hz, 1),
-            "imu_heading_count":  imu_count,
-            "gnss_count":         gnss_count,
-            "gap_warnings":       gap_warnings,
-            "invalid_count":      invalid_count,
+            "session":           session,
+            "elapsed_s":         round(elapsed, 1),
+            "imu_raw_count":     imu_raw_count,
+            "imu_raw_hz":        round(raw_hz, 1),
+            "imu_heading_count": imu_count,
+            "imu_heading_hz":    round(head_hz, 1),
+            "gnss_count":        gnss_count,
+            "gnss_hz":           round(gnss_hz, 2),
+            "gap_warnings":      gap_warnings,
         }
 
+        # Print a human-readable summary to the application log
+        warnings = []
+        if imu_raw_count == 0:
+            warnings.append("imu_raw=0")
+        if gnss_count < expected_gnss * 0.8:
+            warnings.append(f"gnss_low({gnss_count})")
+        warn_str = ", ".join(warnings) if warnings else "none"
+
         log.info(
-            "Recording stopped: %s\n"
-            "  IMU raw samples:     %d  (~%.1f Hz)\n"
-            "  IMU heading samples: %d  (~%.1f Hz)\n"
-            "  GNSS samples:        %d\n"
-            "  System events:       %d\n"
-            "  Timestamp warnings:  %d\n"
-            "  Invalid IMU packets: %d",
+            "\nRecording summary:\n"
+            "  session:     %s\n"
+            "  imu_raw:     %d samples, %.1f Hz\n"
+            "  imu_heading: %d samples, %.1f Hz\n"
+            "  gnss_raw:    %d samples, %.2f Hz\n"
+            "  warnings:    %s",
             session,
             imu_raw_count, raw_hz,
             imu_count, head_hz,
-            gnss_count,
-            event_count,
-            gap_warnings,
-            invalid_count,
+            gnss_count, gnss_hz,
+            warn_str,
         )
 
         from backend.services.sftp_service import SftpService
@@ -260,32 +403,27 @@ class RecordingService:
             })
         return sessions
 
-    # ── High-rate IMU raw loop (always running) ───────────────────────────
+    # ── High-rate IMU raw drain (always running) ──────────────────────────
 
     def _raw_imu_loop(self) -> None:
         """
-        Drains imu_raw_queue at whatever rate the IMU produces data.
-        Writes to imu_raw.csv only when recording is active.
-        Applies downsampling to honour raw_log_rate_hz from config.
+        Drains imu_raw_queue continuously; writes every frame to imu_raw.csv.
+        Write gate is self._imu_raw_writer (not self._active), so the drain
+        continues through the shutdown window after stop() sets _active=False,
+        letting stop() wait for the queue to empty before closing the file.
+        No downsampling — every enqueued raw IMU frame is written.
         """
-        from backend.services.config_service import ConfigService
         from backend.services.imu_raw import imu_raw_queue
 
-        cfg           = ConfigService.get_imu()
-        raw_rate_hz   = float(cfg.get("raw_log_rate_hz", 100))
-        min_interval  = 1.0 / max(raw_rate_hz, 1.0)
-
-        last_written_t  = 0.0
         prev_t_mono: Optional[float] = None
-        was_active      = False
+        was_active  = False
 
-        # Per-session counters (reset when recording starts)
-        raw_count    = 0
+        raw_written  = 0
+        flush_count  = 0
         gap_warnings = 0
 
-        # Frequency measurement window
-        window_samples = 0
-        window_start   = time.monotonic()
+        window_samples  = 0
+        window_start    = time.monotonic()
         next_freq_check = window_start + 5.0
         next_state_push = time.time() + 1.0
 
@@ -296,44 +434,31 @@ class RecordingService:
                 continue
 
             with self._lock:
-                active   = self._active
-                has_imu  = "imu" in self._streams
-                writer   = self._imu_raw_writer
-                fp       = self._imu_raw_file
+                active = self._active
+                writer = self._imu_raw_writer
 
-            # Reset counters when a new recording starts
+            # Reset per-session counters when a new recording starts
             if active and not was_active:
-                raw_count    = 0
-                gap_warnings = 0
-                last_written_t = 0.0
-                prev_t_mono    = None
-                window_samples = 0
-                window_start   = time.monotonic()
+                raw_written     = 0
+                flush_count     = 0
+                gap_warnings    = 0
+                prev_t_mono     = None
+                window_samples  = 0
+                window_start    = time.monotonic()
                 next_freq_check = window_start + 5.0
             was_active = active
 
-            if not active or not has_imu or writer is None:
-                continue  # discard without writing
+            # Discard when no writer (IMU raw not requested, or files already closed)
+            if writer is None:
+                continue
 
-            # ── Timing checks ────────────────────────────────────────────
-            if prev_t_mono is not None:
-                dt = m.timestamp_monotonic - prev_t_mono
-                if dt < 0:
-                    log.warning("IMU non-monotonic timestamp: dt=%.6f s", dt)
-                    gap_warnings += 1
-                elif dt > 0.05:  # >50 ms gap — 5× expected at 100 Hz
-                    log.debug("IMU timestamp gap: dt=%.3f s", dt)
-                    gap_warnings += 1
+            # Timing gap detection — only flag genuine stalls (> 1 s), not
+            # normal chunk-level grouping where many frames share one t_mono.
+            if prev_t_mono is not None and m.timestamp_monotonic - prev_t_mono > 1.0:
+                gap_warnings += 1
             prev_t_mono = m.timestamp_monotonic
 
-            # ── Downsampling ─────────────────────────────────────────────
-            # Use 99% of min_interval to avoid floating-point precision
-            # causing on-rate samples to be wrongly dropped.
-            if m.timestamp_monotonic - last_written_t < min_interval * 0.99:
-                continue
-            last_written_t = m.timestamp_monotonic
-
-            # ── Write row ────────────────────────────────────────────────
+            # Write every frame — no downsampling
             roll_s  = f"{m.roll:.6f}"  if m.roll  is not None else ""
             pitch_s = f"{m.pitch:.6f}" if m.pitch is not None else ""
             yaw_s   = f"{m.yaw:.6f}"   if m.yaw   is not None else ""
@@ -341,45 +466,52 @@ class RecordingService:
             with self._lock:
                 if self._imu_raw_writer:
                     self._imu_raw_writer.writerow([
-                        f"{m.timestamp_monotonic:.6f}",
-                        f"{m.timestamp_unix:.6f}",
+                        f"{m.timestamp_monotonic:.6f}", f"{m.timestamp_unix:.6f}",
                         f"{m.accel_x:.6f}", f"{m.accel_y:.6f}", f"{m.accel_z:.6f}",
                         f"{m.gyro_x:.6f}",  f"{m.gyro_y:.6f}",  f"{m.gyro_z:.6f}",
                         roll_s, pitch_s, yaw_s,
                     ])
-                    self._imu_raw_file.flush()
-                    # Update counter under lock so stop() always gets an accurate count.
-                    raw_count += 1
-                    self._imu_raw_count = raw_count
+                    raw_written += 1
+                    # Flush every 100 rows; stop() does a final flush before close.
+                    if raw_written % 100 == 0:
+                        self._imu_raw_file.flush()
+                        flush_count += 1
+                        self._imu_raw_flush_count = flush_count
+                    self._imu_raw_count = raw_written
                     self._gap_warnings  = gap_warnings
             window_samples += 1
 
-            # ── Periodic frequency check (every 5 s) ─────────────────────
+            # Frequency check every 5 s — uses written count, no undefined vars
             now_m = time.monotonic()
             if now_m >= next_freq_check:
-                elapsed   = now_m - window_start
-                meas_hz   = window_samples / elapsed if elapsed > 0 else 0.0
-                if meas_hz < raw_rate_hz * 0.8:
-                    msg = (f"IMU raw rate low: {meas_hz:.1f}Hz "
-                           f"(target {raw_rate_hz:.0f}Hz)")
-                    log.warning(msg)
-                    self._write_sys_event("WARN", msg)
-                window_samples = 0
-                window_start   = now_m
+                elapsed_w = now_m - window_start
+                meas_hz   = window_samples / elapsed_w if elapsed_w > 0 else 0.0
+                if meas_hz < 80.0:
+                    self._write_sys_event(
+                        "WARN",
+                        f"IMU raw write rate low: {meas_hz:.1f}Hz (expected ~100Hz)",
+                    )
+                window_samples  = 0
+                window_start    = now_m
                 next_freq_check = now_m + 5.0
 
-            # ── Push counts to state (1 Hz) ───────────────────────────────
+            # Push live count to state (1 Hz)
             now_t = time.time()
             if now_t >= next_state_push:
-                state_manager.update(recording_imu_raw_count=raw_count)
+                state_manager.update(recording_imu_raw_count=raw_written)
                 next_state_push = now_t + 1.0
 
-    # ── Low-rate heading / event loop (10 Hz) ─────────────────────────────
+    # ── Main poll loop: heading, GNSS queue drain, system events (10 Hz) ──
 
     def _loop(self) -> None:
-        last_lat   = None
+        from backend.services.gps_service import gnss_queue
+
+        # Initialise last_event to the current state so we only log events
+        # that happen AFTER this recording starts (avoids logging stale boot
+        # messages like "Not found: GPS" that were set before the session).
+        s = state_manager.get_snapshot()
         last_yaw   = None
-        last_event = None
+        last_event = s.get("last_event", "")
         gnss_count = imu_count = event_count = 0
         next_state_push = time.time() + _STATE_UPDATE_INTERVAL
 
@@ -394,21 +526,34 @@ class RecordingService:
                 t_mono = time.monotonic()
                 t_unix = time.time()
 
-                if "gnss" in streams and s["gps_fix_quality"] > 0:
-                    cur_lat = s["gps_lat"]
-                    if cur_lat != last_lat:
+                # ── GNSS: drain queue fully each tick (event-driven, no poll lag)
+                # No downsampling — every valid GGA is logged.
+                # The ZED-F9P naturally limits output to ~1 Hz externally.
+                if "gnss" in streams:
+                    while True:
+                        try:
+                            m = gnss_queue.get_nowait()
+                        except queue.Empty:
+                            break
                         with self._lock:
                             if self._gnss_writer:
                                 self._gnss_writer.writerow([
-                                    f"{t_mono:.6f}", f"{t_unix:.6f}",
-                                    s["gps_lat"], s["gps_lon"], s["gps_altitude_m"],
-                                    s["gps_fix_quality"], s["gps_status_text"],
-                                    s["gps_satellites"], s["gps_hdop"],
+                                    f"{m.timestamp_monotonic:.6f}",
+                                    f"{m.timestamp_unix:.6f}",
+                                    f"{m.lat:.9f}",
+                                    f"{m.lon:.9f}",
+                                    f"{m.altitude_m:.3f}",
+                                    m.fix_quality,
+                                    m.fix_type_text,
+                                    "",   # h_acc_m — not in NMEA GGA
+                                    "",   # v_acc_m — not in NMEA GGA
+                                    m.satellites,
+                                    f"{m.hdop:.2f}",
                                 ])
                                 self._gnss_file.flush()
-                        last_lat = cur_lat
                         gnss_count += 1
 
+                # ── IMU heading (~10 Hz via state change detection) ───────
                 if "imu" in streams and s["imu_yaw_valid"]:
                     cur_yaw = s["imu_yaw_deg"]
                     if cur_yaw != last_yaw:
@@ -424,6 +569,7 @@ class RecordingService:
                         last_yaw = cur_yaw
                         imu_count += 1
 
+                # ── System events (state changes since session start) ──────
                 if "system" in streams:
                     event = s.get("last_event", "")
                     if event and event != last_event:
@@ -458,7 +604,6 @@ class RecordingService:
     # ── Internal helpers ──────────────────────────────────────────────────
 
     def _write_sys_event(self, level: str, message: str) -> None:
-        """Write a message to system_status.csv (safe to call from any thread)."""
         t_mono = time.monotonic()
         t_unix = time.time()
         with self._lock:
@@ -475,7 +620,7 @@ class RecordingService:
                     f.close()
                 except Exception:
                     pass
-        self._gnss_file     = self._gnss_writer     = None
-        self._imu_file      = self._imu_writer       = None
-        self._imu_raw_file  = self._imu_raw_writer   = None
-        self._sys_file      = self._sys_writer       = None
+        self._gnss_file    = self._gnss_writer    = None
+        self._imu_file     = self._imu_writer      = None
+        self._imu_raw_file = self._imu_raw_writer  = None
+        self._sys_file     = self._sys_writer      = None
