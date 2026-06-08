@@ -43,6 +43,14 @@ def _get_local_ips() -> str:
                 if addr.family == socket.AF_INET:
                     ips.append(f"{addr.address} ({iface})")
         return ", ".join(ips) if ips else ""
+    except ImportError:
+        # psutil not available — fall back to routing-socket trick (single IP).
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("10.254.254.254", 1))
+                return s.getsockname()[0]
+        except Exception:
+            return ""
     except Exception:
         return ""
 
