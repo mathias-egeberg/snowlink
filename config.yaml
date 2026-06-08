@@ -1,0 +1,39 @@
+# SnowLink hardware and recording configuration
+#
+# IMPORTANT: When both IMU and GNSS are connected, set explicit port paths
+# from /dev/serial/by-id/ to prevent port swapping between sessions.
+#
+# Find your device paths:
+#   ls -l /dev/serial/by-id/
+#
+# Leave port empty ("") to fall back to auto-detection (not recommended
+# when multiple USB serial devices are plugged in simultaneously).
+
+imu:
+  enabled: true
+  port: /dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0
+  baudrate: 921600  # informational — code auto-detects via rotation (921600→115200→9600)
+  raw_log_enabled: true
+  raw_log_rate_hz: 100    # target CSV write rate (must be <= native_rate_hz)
+  native_rate_hz: 100     # actual N100 0x40 frame output rate; used by credit-based downsampling
+  heading_log_rate_hz: 10
+
+gnss:
+  enabled: true
+  port: /dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00
+  baudrate: 115200  # must match ZED-F9P baud rate (configure in u-center/u-center2)
+  log_rate_hz: 1    # target CSV log rate; ZED-F9P output rate configured externally in u-center
+  protocol: auto    # auto = NMEA (GGA sentences); future: ubx
+
+logging:
+  session_prefix: test
+  write_system_status: true
+  flush_interval_sec: 1.0
+
+sftp:
+  enabled: true          # set to true to enable automatic upload after each session
+  host: "sftp.megeberg.no"
+  port: 2022
+  username: "snowlink_user"
+  password: "snowlink_login"
+  remote_base_path: "/snowlink_data/logs"   # sessions are uploaded under YYYY-MM-DD/ sub-folders

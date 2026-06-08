@@ -1,6 +1,6 @@
 import unittest
 
-from app.services.settings_service import SettingsService
+from backend.services.settings_service import SettingsService
 
 
 class SettingsServiceTests(unittest.TestCase):

@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>SnowLink</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+  <link rel="stylesheet"
+    href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+
+  <!-- MapLibre (must be a regular script so maplibregl global is available
+       before the ES-module map.js runs) -->
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+
+  <!-- Import map for Three.js ES modules (used by map.js) -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+<div id="app">
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- DASHBOARD SCREEN                                                   -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <div id="screen-dashboard" class="screen active" role="main">
+
+    <header class="screen-header">
+      <div class="header-left">
+        <span class="app-title">SnowLink</span>
+        <div class="system-status">
+          <span id="dash-status-dot" class="status-dot inactive">&#9679;</span>
+          <span id="dash-status-text" class="status-label inactive">IDLE</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="gps-badge">
+          <span class="badge-label">GPS</span>
+          <span id="dash-gps-text" class="badge-value danger">No Fix</span>
+        </div>
+        <div class="conn-indicators">
+          <div class="conn-indicator" id="ind-dash-5g" title="Cellular">
+            <svg class="conn-svg" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true"><rect x="0" y="12" width="4" height="4" rx="0.5"/><rect x="6.5" y="9" width="4" height="7" rx="0.5"/><rect x="13" y="6" width="4" height="10" rx="0.5"/><rect x="19.5" y="2" width="4" height="14" rx="0.5"/></svg>
+            <span class="conn-label">5G</span>
+          </div>
+          <div class="conn-indicator gps-action" id="ind-dash-gps" title="GPS Status"
+               role="button" tabindex="0" aria-label="Open GPS Status"
+               onclick="GpsStatus.open()"
+               onkeydown="if(event.key==='Enter'||event.key===' ')GpsStatus.open()">
+            <svg class="conn-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><line x1="1" y1="12" x2="23" y2="12"/><line x1="12" y1="1" x2="12" y2="23"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/></svg>
+            <span class="conn-label">GPS</span>
+          </div>
+          <div class="conn-indicator" id="ind-dash-imu" title="IMU">
+            <svg class="conn-svg" viewBox="0 0 24 26" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="10" y1="14" x2="19" y2="14"/><polyline points="16,11 20,14 16,17"/><line x1="10" y1="14" x2="10" y2="5"/><polyline points="7,8 10,4 13,8"/><line x1="10" y1="14" x2="3" y2="21"/><polyline points="6,21 3,21 3,18"/></svg>
+            <span class="conn-label">IMU</span>
+          </div>
+        </div>
+        <div class="clock-block">
+          <span id="dash-time" class="clock-time">--:--:--</span>
+          <span id="dash-date" class="clock-date">---</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="sensor-grid-wrapper">
+      <!-- Row 1: environmental sensors -->
+      <div class="sensor-row">
+        <div class="sensor-card">
+          <span class="card-label">Outside Temperature</span>
+          <span class="card-value" id="card-temp">--</span>
+          <span class="card-unit">&deg;C</span>
+        </div>
+        <div class="sensor-card">
+          <span class="card-label">Snow Depth</span>
+          <span class="card-value" id="card-snow">--</span>
+          <span class="card-unit">cm</span>
+        </div>
+        <div class="sensor-card">
+          <span class="card-label">Wind Speed</span>
+          <span class="card-value" id="card-wind">--</span>
+          <span class="card-unit">m/s</span>
+        </div>
+      </div>
+      <!-- Row 2: system metrics -->
+      <div class="sensor-row">
+        <div class="sensor-card">
+          <span class="card-label">Power Consumption</span>
+          <span class="card-value" id="card-power">0</span>
+          <span class="card-unit">W</span>
+        </div>
+        <div class="sensor-card">
+          <span class="card-label">Active Devices</span>
+          <span class="card-value" id="card-devices">0</span>
+          <span class="card-unit"></span>
+        </div>
+        <div class="sensor-card event-card">
+          <span class="card-label">Last Event</span>
+          <span class="card-value event-text" id="card-event">---</span>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /screen-dashboard -->
+
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- MAP SCREEN                                                         -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <div id="screen-map" class="screen" role="main">
+
+    <header class="screen-header map-header">
+      <div class="header-left">
+        <span class="app-title">Map</span>
+      </div>
+      <div class="header-right">
+        <div class="gps-badge">
+          <span class="badge-label">GPS</span>
+          <span id="map-gps-text" class="badge-value danger">No Fix</span>
+        </div>
+        <div class="conn-indicators">
+          <div class="conn-indicator" id="ind-map-5g" title="Cellular">
+            <svg class="conn-svg" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true"><rect x="0" y="12" width="4" height="4" rx="0.5"/><rect x="6.5" y="9" width="4" height="7" rx="0.5"/><rect x="13" y="6" width="4" height="10" rx="0.5"/><rect x="19.5" y="2" width="4" height="14" rx="0.5"/></svg>
+            <span class="conn-label">5G</span>
+          </div>
+          <div class="conn-indicator gps-action" id="ind-map-gps" title="GPS Status"
+               role="button" tabindex="0" aria-label="Open GPS Status"
+               onclick="GpsStatus.open()"
+               onkeydown="if(event.key==='Enter'||event.key===' ')GpsStatus.open()">
+            <svg class="conn-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><line x1="1" y1="12" x2="23" y2="12"/><line x1="12" y1="1" x2="12" y2="23"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/></svg>
+            <span class="conn-label">GPS</span>
+          </div>
+          <div class="conn-indicator" id="ind-map-imu" title="IMU">
+            <svg class="conn-svg" viewBox="0 0 24 26" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="10" y1="14" x2="19" y2="14"/><polyline points="16,11 20,14 16,17"/><line x1="10" y1="14" x2="10" y2="5"/><polyline points="7,8 10,4 13,8"/><line x1="10" y1="14" x2="3" y2="21"/><polyline points="6,21 3,21 3,18"/></svg>
+            <span class="conn-label">IMU</span>
+          </div>
+        </div>
+        <div class="clock-block">
+          <span id="map-time" class="clock-time">--:--:--</span>
+          <span id="map-date" class="clock-date">---</span>
+        </div>
+      </div>
+    </header>
+
+    <div id="map-container">
+      <div id="map"></div>
+    </div>
+
+  </div><!-- /screen-map -->
+
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- CONTROL SCREEN                                                     -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <div id="screen-control" class="screen" role="main">
+
+    <header class="screen-header">
+      <div class="header-left">
+        <span class="app-title">Device Control</span>
+      </div>
+      <div class="header-right">
+        <div class="gps-badge">
+          <span class="badge-label">GPS</span>
+          <span id="ctrl-gps-text" class="badge-value danger">No Fix</span>
+        </div>
+        <div class="conn-indicators">
+          <div class="conn-indicator" id="ind-ctrl-5g" title="Cellular">
+            <svg class="conn-svg" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true"><rect x="0" y="12" width="4" height="4" rx="0.5"/><rect x="6.5" y="9" width="4" height="7" rx="0.5"/><rect x="13" y="6" width="4" height="10" rx="0.5"/><rect x="19.5" y="2" width="4" height="14" rx="0.5"/></svg>
+            <span class="conn-label">5G</span>
+          </div>
+          <div class="conn-indicator gps-action" id="ind-ctrl-gps" title="GPS Status"
+               role="button" tabindex="0" aria-label="Open GPS Status"
+               onclick="GpsStatus.open()"
+               onkeydown="if(event.key==='Enter'||event.key===' ')GpsStatus.open()">
+            <svg class="conn-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><line x1="1" y1="12" x2="23" y2="12"/><line x1="12" y1="1" x2="12" y2="23"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/></svg>
+            <span class="conn-label">GPS</span>
+          </div>
+          <div class="conn-indicator" id="ind-ctrl-imu" title="IMU">
+            <svg class="conn-svg" viewBox="0 0 24 26" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="10" y1="14" x2="19" y2="14"/><polyline points="16,11 20,14 16,17"/><line x1="10" y1="14" x2="10" y2="5"/><polyline points="7,8 10,4 13,8"/><line x1="10" y1="14" x2="3" y2="21"/><polyline points="6,21 3,21 3,18"/></svg>
+            <span class="conn-label">IMU</span>
+          </div>
+        </div>
+        <div class="clock-block">
+          <span id="ctrl-time" class="clock-time">--:--:--</span>
+          <span id="ctrl-date" class="clock-date">---</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="device-grid">
+
+      <div class="device-card">
+        <div class="device-info">
+          <span class="device-name">Roof Heater</span>
+          <span class="device-desc">1200 W heating element</span>
+        </div>
+        <button class="toggle-btn off" id="toggle-heat-roof"
+                data-device="heat_roof_on" onclick="Controls.toggle(this)">
+          OFF
+        </button>
+      </div>
+
+      <div class="device-card">
+        <div class="device-info">
+          <span class="device-name">Gutter Heater</span>
+          <span class="device-desc">800 W heating element</span>
+        </div>
+        <button class="toggle-btn off" id="toggle-heat-gutter"
+                data-device="heat_gutter_on" onclick="Controls.toggle(this)">
+          OFF
+        </button>
+      </div>
+
+      <div class="device-card">
+        <div class="device-info">
+          <span class="device-name">Water Pump</span>
+          <span class="device-desc">250 W centrifugal pump</span>
+        </div>
+        <button class="toggle-btn off" id="toggle-pump"
+                data-device="pump_on" onclick="Controls.toggle(this)">
+          OFF
+        </button>
+      </div>
+
+      <div class="device-card">
+        <div class="device-info">
+          <span class="device-name">Sensor Light</span>
+          <span class="device-desc">15 W illumination</span>
+        </div>
+        <button class="toggle-btn on" id="toggle-sensor-light"
+                data-device="sensor_light_on" onclick="Controls.toggle(this)">
+          ON
+        </button>
+      </div>
+
+    </div>
+
+  </div><!-- /screen-control -->
+
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- SETTINGS SCREEN                                                    -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <div id="screen-settings" class="screen" role="main">
+
+    <header class="screen-header">
+      <div class="header-left">
+        <span class="app-title">Settings</span>
+      </div>
+      <div class="header-right">
+        <div class="gps-badge">
+          <span class="badge-label">GPS</span>
+          <span id="set-gps-text" class="badge-value danger">No Fix</span>
+        </div>
+        <div class="conn-indicators">
+          <div class="conn-indicator" id="ind-set-5g" title="Cellular">
+            <svg class="conn-svg" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true"><rect x="0" y="12" width="4" height="4" rx="0.5"/><rect x="6.5" y="9" width="4" height="7" rx="0.5"/><rect x="13" y="6" width="4" height="10" rx="0.5"/><rect x="19.5" y="2" width="4" height="14" rx="0.5"/></svg>
+            <span class="conn-label">5G</span>
+          </div>
+          <div class="conn-indicator gps-action" id="ind-set-gps" title="GPS Status"
+               role="button" tabindex="0" aria-label="Open GPS Status"
+               onclick="GpsStatus.open()"
+               onkeydown="if(event.key==='Enter'||event.key===' ')GpsStatus.open()">
+            <svg class="conn-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><line x1="1" y1="12" x2="23" y2="12"/><line x1="12" y1="1" x2="12" y2="23"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/></svg>
+            <span class="conn-label">GPS</span>
+          </div>
+          <div class="conn-indicator" id="ind-set-imu" title="IMU">
+            <svg class="conn-svg" viewBox="0 0 24 26" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="10" y1="14" x2="19" y2="14"/><polyline points="16,11 20,14 16,17"/><line x1="10" y1="14" x2="10" y2="5"/><polyline points="7,8 10,4 13,8"/><line x1="10" y1="14" x2="3" y2="21"/><polyline points="6,21 3,21 3,18"/></svg>
+            <span class="conn-label">IMU</span>
+          </div>
+        </div>
+        <div class="clock-block">
+          <span id="set-time" class="clock-time">--:--:--</span>
+          <span id="set-date" class="clock-date">---</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="settings-scroll">
+
+      <!-- NTRIP --------------------------------------------------------- -->
+      <div class="section-label">NTRIP CASTER</div>
+      <div class="settings-card">
+
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-title">Correction Data</span>
+            <span class="settings-row-desc">RTK corrections via NTRIP protocol</span>
+          </div>
+          <button id="btn-ntrip-toggle" class="pill-btn danger"
+                  onclick="Settings.toggleNtrip()">Disabled</button>
+        </div>
+
+        <div class="settings-divider"></div>
+
+        <div class="settings-field">
+          <label class="field-label">Host</label>
+          <input id="inp-host" class="field-input" type="text"
+                 placeholder="e.g. ntrip.example.com" autocomplete="off" />
+        </div>
+        <div class="settings-field">
+          <label class="field-label">Port</label>
+          <input id="inp-port" class="field-input" type="number"
+                 placeholder="2101" min="1" max="65535" />
+        </div>
+        <div class="settings-field">
+          <label class="field-label">Mountpoint</label>
+          <input id="inp-mountpoint" class="field-input" type="text"
+                 placeholder="e.g. RTCM3_MSM" autocomplete="off" />
+        </div>
+        <div class="settings-field">
+          <label class="field-label">Username</label>
+          <input id="inp-username" class="field-input" type="text"
+                 placeholder="Username (optional)" autocomplete="username" />
+        </div>
+        <div class="settings-field">
+          <label class="field-label">Password</label>
+          <input id="inp-password" class="field-input" type="password"
+                 placeholder="Password (optional)" autocomplete="current-password" />
+        </div>
+
+        <div class="settings-row-end">
+          <button id="btn-save-ntrip" class="accent-btn" onclick="Settings.saveNtrip()">
+            Save
+          </button>
+        </div>
+
+      </div><!-- /ntrip card -->
+
+      <!-- MAP ----------------------------------------------------------- -->
+      <div class="section-label">MAP</div>
+      <div class="settings-card">
+
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-title">Position Marker</span>
+            <span class="settings-row-desc">Style shown on the map</span>
+          </div>
+          <button id="btn-marker-style" class="pill-btn accent"
+                  onclick="Settings.toggleMarkerStyle()">Snowcat Model</button>
+        </div>
+
+        <div class="settings-divider"></div>
+
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-title">IMU Heading Control</span>
+            <span class="settings-row-desc">Rotate the snowcat and map bearing from calibrated yaw</span>
+          </div>
+          <button id="btn-imu-heading" class="pill-btn danger"
+                  onclick="Settings.toggleImuHeading()">Disabled</button>
+        </div>
+
+        <div class="settings-divider"></div>
+
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-title">Calibrate IMU</span>
+            <span id="imu-heading-status" class="settings-row-desc">IMU disconnected</span>
+          </div>
+          <button id="btn-calibrate-imu" class="pill-btn inactive" disabled
+                  onclick="Settings.calibrateImu()">Calibrate</button>
+        </div>
+
+      </div><!-- /map card -->
+
+      <!-- GPS ----------------------------------------------------------- -->
+      <div class="section-label">GPS / RTK</div>
+      <div class="settings-card">
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-title">GPS Status</span>
+            <span class="settings-row-desc">Satellites, fix type, coordinates and NTRIP</span>
+          </div>
+          <button class="pill-btn accent" onclick="GpsStatus.open()">Open</button>
+        </div>
+      </div>
+
+      <!-- GNSS ---------------------------------------------------------- -->
+      <div class="section-label">GNSS</div>
+      <div class="settings-card">
+
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-title">Update Rate</span>
+            <span class="settings-row-desc">Applied via UBX-CFG-RATE at receiver connect</span>
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button id="btn-gnss-rate-1"  class="pill-btn inactive" onclick="Settings.setGnssRate(1)">1 Hz</button>
+            <button id="btn-gnss-rate-5"  class="pill-btn success"  onclick="Settings.setGnssRate(5)">5 Hz</button>
+            <button id="btn-gnss-rate-10" class="pill-btn inactive" onclick="Settings.setGnssRate(10)">10 Hz</button>
+          </div>
+        </div>
+
+        <div class="settings-divider"></div>
+
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-title">Rate Guide</span>
+            <span class="settings-row-desc">5 Hz — recommended for normal RTK+IMU fusion</span>
+            <span class="settings-row-desc">10 Hz — advanced: only after confirming timestamping, logging, correction input, and CPU load are stable</span>
+          </div>
+        </div>
+
+      </div><!-- /gnss card -->
+
+      <!-- CELLULAR ------------------------------------------------------ -->
+      <div class="section-label">CELLULAR</div>
+      <div class="settings-card">
+
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-title">4G Dongle</span>
+            <span id="cellular-status" class="settings-row-desc cellular-status danger">No modem</span>
+            <span id="cellular-detail" class="settings-row-desc">Waiting for USB dongle</span>
+          </div>
+        </div>
+
+        <div class="settings-divider"></div>
+
+        <div class="cellular-usage-grid">
+          <div class="cellular-usage-item">
+            <span class="cellular-usage-label">Received</span>
+            <span id="cellular-rx" class="cellular-usage-value">0 B</span>
+          </div>
+          <div class="cellular-usage-item">
+            <span class="cellular-usage-label">Sent</span>
+            <span id="cellular-tx" class="cellular-usage-value">0 B</span>
+          </div>
+          <div class="cellular-usage-item">
+            <span class="cellular-usage-label">Total</span>
+            <span id="cellular-total" class="cellular-usage-value">0 B</span>
+          </div>
+        </div>
+
+        <div class="settings-divider"></div>
+
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-title">Data Counter</span>
+            <span id="cellular-reset-time" class="settings-row-desc">Last reset: Never</span>
+          </div>
+          <button id="btn-reset-cellular-usage" class="pill-btn warning"
+                  onclick="Settings.resetCellularUsage()">Reset</button>
+        </div>
+
+        <div class="settings-divider"></div>
+
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-title">Speed Test</span>
+            <span id="cellular-speed-status" class="settings-row-desc cellular-status">Never run</span>
+          </div>
+          <button id="btn-cellular-speed-test" class="pill-btn inactive" disabled
+                  onclick="Settings.runCellularSpeedTest()">Test</button>
+        </div>
+
+        <div class="cellular-usage-grid cellular-speed-grid">
+          <div class="cellular-usage-item">
+            <span class="cellular-usage-label">Download</span>
+            <span id="cellular-speed-download" class="cellular-usage-value">0.0 Mbps</span>
+          </div>
+          <div class="cellular-usage-item">
+            <span class="cellular-usage-label">Upload</span>
+            <span id="cellular-speed-upload" class="cellular-usage-value">0.0 Mbps</span>
+          </div>
+          <div class="cellular-usage-item">
+            <span class="cellular-usage-label">Latency</span>
+            <span id="cellular-speed-latency" class="cellular-usage-value">0 ms</span>
+          </div>
+        </div>
+
+      </div><!-- /cellular card -->
+
+      <!-- APPLICATION --------------------------------------------------- -->
+      <div class="section-label">APPLICATION</div>
+      <div class="settings-card">
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-title">Local IP</span>
+            <span class="settings-row-desc">LAN / WiFi address (not cellular)</span>
+          </div>
+          <span id="set-local-ip" class="settings-row-desc">—</span>
+        </div>
+
+        <div class="settings-divider"></div>
+
+        <div class="settings-row">
+          <span class="settings-row-title">Application Version</span>
+          <span id="app-version" class="settings-row-desc version-text">1.0.0</span>
+        </div>
+      </div>
+
+    </div><!-- /settings-scroll -->
+
+  </div><!-- /screen-settings -->
+
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- RECORD SCREEN                                                      -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <div id="screen-record" class="screen" role="main">
+
+    <header class="screen-header">
+      <div class="header-left">
+        <span class="app-title">Record</span>
+      </div>
+      <div class="header-right">
+        <div class="gps-badge">
+          <span class="badge-label">GPS</span>
+          <span id="rec-gps-text" class="badge-value danger">No Fix</span>
+        </div>
+        <div class="conn-indicators">
+          <div class="conn-indicator" id="ind-rec-5g" title="Cellular">
+            <svg class="conn-svg" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true"><rect x="0" y="12" width="4" height="4" rx="0.5"/><rect x="6.5" y="9" width="4" height="7" rx="0.5"/><rect x="13" y="6" width="4" height="10" rx="0.5"/><rect x="19.5" y="2" width="4" height="14" rx="0.5"/></svg>
+            <span class="conn-label">5G</span>
+          </div>
+          <div class="conn-indicator gps-action" id="ind-rec-gps" title="GPS Status"
+               role="button" tabindex="0" aria-label="Open GPS Status"
+               onclick="GpsStatus.open()"
+               onkeydown="if(event.key==='Enter'||event.key===' ')GpsStatus.open()">
+            <svg class="conn-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><line x1="1" y1="12" x2="23" y2="12"/><line x1="12" y1="1" x2="12" y2="23"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/></svg>
+            <span class="conn-label">GPS</span>
+          </div>
+          <div class="conn-indicator" id="ind-rec-imu" title="IMU">
+            <svg class="conn-svg" viewBox="0 0 24 26" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="10" y1="14" x2="19" y2="14"/><polyline points="16,11 20,14 16,17"/><line x1="10" y1="14" x2="10" y2="5"/><polyline points="7,8 10,4 13,8"/><line x1="10" y1="14" x2="3" y2="21"/><polyline points="6,21 3,21 3,18"/></svg>
+            <span class="conn-label">IMU</span>
+          </div>
+        </div>
+        <div class="clock-block">
+          <span id="rec-time" class="clock-time">--:--:--</span>
+          <span id="rec-date" class="clock-date">---</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="record-layout">
+
+      <!-- Left column: recording control -->
+      <div class="record-left">
+
+        <!-- Config panel (shown when not recording) -->
+        <div id="rec-config-panel">
+          <div class="section-label">NEW RECORDING</div>
+          <div class="settings-card">
+
+            <div class="settings-field">
+              <label class="field-label">Session Name</label>
+              <input id="rec-session-name" class="field-input" type="text"
+                     placeholder="e.g. static_test_001" autocomplete="off" maxlength="60" />
+            </div>
+
+            <div class="settings-divider"></div>
+
+            <div class="settings-row">
+              <div class="settings-row-info">
+                <span class="settings-row-title">GNSS Raw</span>
+                <span class="settings-row-desc">lat, lon, alt, fix quality, RTK status, satellites, HDOP</span>
+              </div>
+              <label class="rec-toggle">
+                <input type="checkbox" id="rec-stream-gnss" checked />
+                <span class="rec-toggle-track"></span>
+              </label>
+            </div>
+
+            <div class="settings-divider"></div>
+
+            <div class="settings-row">
+              <div class="settings-row-info">
+                <span class="settings-row-title">IMU Heading</span>
+                <span class="settings-row-desc">yaw angle and calibrated heading from IMU</span>
+              </div>
+              <label class="rec-toggle">
+                <input type="checkbox" id="rec-stream-imu" checked />
+                <span class="rec-toggle-track"></span>
+              </label>
+            </div>
+
+            <div class="settings-divider"></div>
+
+            <div class="settings-row">
+              <div class="settings-row-info">
+                <span class="settings-row-title">System Events</span>
+                <span class="settings-row-desc">connection events, errors, and status changes</span>
+              </div>
+              <label class="rec-toggle">
+                <input type="checkbox" id="rec-stream-system" checked />
+                <span class="rec-toggle-track"></span>
+              </label>
+            </div>
+
+            <div class="settings-divider"></div>
+
+            <div class="rec-action-row">
+              <button id="rec-start-btn" class="rec-start-btn" onclick="Record.start()">
+                Start Recording
+              </button>
+            </div>
+
+          </div>
+        </div><!-- /rec-config-panel -->
+
+        <!-- Active panel (shown when recording) -->
+        <div id="rec-active-panel" class="hidden">
+          <div class="section-label">RECORDING ACTIVE</div>
+          <div class="settings-card rec-active-card">
+
+            <div class="rec-indicator-row">
+              <span class="rec-dot"></span>
+              <span class="rec-active-label">Recording</span>
+              <span id="rec-duration" class="rec-duration">0:00:00</span>
+            </div>
+
+            <div class="settings-divider"></div>
+
+            <div class="settings-row">
+              <span class="settings-row-title">Session</span>
+              <span id="rec-session-display" class="rec-session-name">—</span>
+            </div>
+
+            <div class="settings-divider"></div>
+
+            <div class="rec-counts-grid">
+              <div class="rec-count-cell" id="rec-gnss-cell">
+                <span class="rec-count-value" id="rec-gnss-count">0</span>
+                <span class="rec-count-label">GNSS samples</span>
+              </div>
+              <div class="rec-count-cell" id="rec-imu-cell">
+                <span class="rec-count-value" id="rec-imu-count">0</span>
+                <span class="rec-count-label">IMU samples</span>
+              </div>
+              <div class="rec-count-cell" id="rec-sys-cell">
+                <span class="rec-count-value" id="rec-event-count">0</span>
+                <span class="rec-count-label">System events</span>
+              </div>
+            </div>
+
+            <div class="settings-divider"></div>
+
+            <div class="rec-action-row">
+              <button class="rec-stop-btn" onclick="Record.stop()">
+                Stop Recording
+              </button>
+            </div>
+
+          </div>
+        </div><!-- /rec-active-panel -->
+
+      </div><!-- /record-left -->
+
+      <!-- Right column: past sessions -->
+      <div class="record-right">
+        <div class="section-label">
+          PAST SESSIONS
+          <button class="rec-refresh-btn" onclick="Record.loadSessions()" title="Refresh">&#x21BA;</button>
+        </div>
+        <div class="settings-card rec-sessions-card">
+          <div id="rec-sessions-list">
+            <span class="rec-no-sessions">No sessions yet</span>
+          </div>
+        </div>
+      </div><!-- /record-right -->
+
+    </div><!-- /record-layout -->
+
+  </div><!-- /screen-record -->
+
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- BOTTOM NAVIGATION                                                  -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <nav id="nav-bar">
+    <button class="nav-btn active" data-screen="dashboard" onclick="Nav.go('dashboard')">
+      Dashboard
+    </button>
+    <button class="nav-btn" data-screen="map" onclick="Nav.go('map')">
+      Map
+    </button>
+    <button class="nav-btn" data-screen="control" onclick="Nav.go('control')">
+      Control
+    </button>
+    <button class="nav-btn" data-screen="settings" onclick="Nav.go('settings')">
+      Settings
+    </button>
+    <button class="nav-btn" data-screen="record" onclick="Nav.go('record')">
+      Record
+    </button>
+    <button class="nav-btn exit-btn" onclick="ExitDialog.show()">
+      &#x23FB; Exit
+    </button>
+  </nav>
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- GPS STATUS OVERLAY (sub-page, z-index 500)                        -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <div id="gps-overlay" class="gps-overlay hidden" role="main" aria-label="GPS Status">
+
+    <header class="gps-overlay-header">
+      <button class="back-btn" onclick="GpsStatus.close()" aria-label="Back">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="15 18 9 12 15 6"/>
+        </svg>
+        Back
+      </button>
+      <span class="gps-overlay-title">GPS Status</span>
+    </header>
+
+    <div class="gps-overlay-content">
+
+      <!-- Fix status banner -->
+      <div class="gps-banner">
+        <div class="gps-banner-left">
+          <span class="gps-banner-label">Fix Type</span>
+          <span id="gps-banner-status" class="gps-banner-status danger">No Fix</span>
+        </div>
+        <svg id="gps-banner-icon" class="gps-banner-icon danger"
+             viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="7"/>
+          <line x1="1" y1="12" x2="23" y2="12"/>
+          <line x1="12" y1="1" x2="12" y2="23"/>
+          <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/>
+        </svg>
+      </div>
+
+      <!-- Satellite / HDOP / Quality metrics -->
+      <div class="section-label">Signal</div>
+      <div class="gps-metric-grid">
+        <div class="gps-metric-card">
+          <span class="gps-metric-label">Satellites</span>
+          <span id="gps-satellites" class="gps-metric-value">--</span>
+          <span class="gps-metric-unit">in view</span>
+        </div>
+        <div class="gps-metric-card">
+          <span class="gps-metric-label">HDOP</span>
+          <span id="gps-hdop" class="gps-metric-value">--</span>
+          <span class="gps-metric-unit">accuracy</span>
+        </div>
+        <div class="gps-metric-card">
+          <span class="gps-metric-label">Fix Quality</span>
+          <span id="gps-fix-quality" class="gps-metric-value">--</span>
+          <span class="gps-metric-unit">code (0–6)</span>
+        </div>
+      </div>
+
+      <!-- Altitude -->
+      <div class="section-label">Altitude</div>
+      <div class="gps-metric-grid">
+        <div class="gps-metric-card">
+          <span class="gps-metric-label">Altitude</span>
+          <span id="gps-altitude" class="gps-metric-value">--</span>
+          <span class="gps-metric-unit">metres (MSL)</span>
+        </div>
+      </div>
+
+      <!-- Coordinates -->
+      <div class="section-label">Position</div>
+      <div class="gps-coord-grid">
+        <div class="gps-metric-card">
+          <span class="gps-metric-label">Latitude</span>
+          <span id="gps-lat" class="gps-metric-value gps-coord-value">--</span>
+          <span class="gps-metric-unit">degrees</span>
+        </div>
+        <div class="gps-metric-card">
+          <span class="gps-metric-label">Longitude</span>
+          <span id="gps-lon" class="gps-metric-value gps-coord-value">--</span>
+          <span class="gps-metric-unit">degrees</span>
+        </div>
+      </div>
+
+      <!-- NTRIP / RTK -->
+      <div class="section-label">RTK Corrections</div>
+      <div class="settings-card">
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-title">NTRIP Caster</span>
+            <span id="gps-ntrip-status" class="settings-row-desc">Disabled</span>
+          </div>
+        </div>
+        <div class="settings-divider"></div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-title">Device</span>
+            <span id="gps-device-status" class="settings-row-desc cellular-status danger">Disconnected</span>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /gps-overlay-content -->
+  </div><!-- /gps-overlay -->
+
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- ON-SCREEN KEYBOARD (z-index 600)                                   -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <div id="osk-container" class="osk-container hidden" aria-label="On-screen keyboard" role="dialog"></div>
+
+  <!-- Exit confirmation dialog -->
+  <div id="exit-overlay" class="exit-overlay hidden" onclick="ExitDialog.hide()">
+    <div class="exit-dialog" onclick="event.stopPropagation()">
+      <p class="exit-dialog-title">Shut down SnowLink?</p>
+      <div class="exit-dialog-actions">
+        <button class="exit-dialog-btn cancel" onclick="ExitDialog.hide()">Cancel</button>
+        <button class="exit-dialog-btn confirm" onclick="ExitDialog.confirm()">Shut Down</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /app -->
+
+<!-- Application scripts (plain JS, no build step) -->
+<script src="/src/state.js"></script>
+<script src="/src/api.js"></script>
+<script src="/src/websocket.js"></script>
+<script src="/src/nav.js"></script>
+<script src="/src/dashboard.js"></script>
+<script src="/src/controls.js"></script>
+<script src="/src/settings.js"></script>
+<script src="/src/gps.js"></script>
+<script src="/src/record.js"></script>
+<script src="/src/keyboard.js"></script>
+<script src="/src/app.js"></script>
+
+<!-- Map module last (uses ES module imports for Three.js) -->
+<script type="module" src="/src/map.js"></script>
+</body>
+</html>

@@ -1,0 +1,1115 @@
+/* ── Theme variables (from app/theme.py) ──────────────────────────── */
+:root {
+  --bg:       #1A1A2E;
+  --surface:  #16213E;
+  --card:     #0F3460;
+  --nav:      #0C1020;
+  --accent:   #00B4D8;
+  --success:  #06D6A0;
+  --warning:  #FFB703;
+  --danger:   #EF233C;
+  --inactive: #4D4D59;
+  --text:     #E8E8E8;
+  --text-sec: #9CA3AF;
+
+  --nav-height: 68px;
+  --header-height: 70px;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-pill: 24px;
+}
+
+/* ── Reset ────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Input elements must be selectable even though body sets user-select:none */
+input, textarea, select {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* ── App shell ────────────────────────────────────────────────────── */
+#app {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+/* ── Screens ──────────────────────────────────────────────────────── */
+.screen {
+  display: none;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  background: var(--bg);
+}
+.screen.active {
+  display: flex;
+}
+
+/* ── Screen header ────────────────────────────────────────────────── */
+.screen-header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--header-height);
+  min-height: var(--header-height);
+  padding: 0 24px;
+  gap: 12px;
+  background: var(--surface);
+  border-bottom: 1px solid rgba(0, 180, 216, 0.3);
+  flex-shrink: 0;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.app-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+/* ── System status indicator ──────────────────────────────────────── */
+.system-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.status-dot {
+  font-size: 18px;
+  line-height: 1;
+}
+.status-label {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.status-dot.active,   .status-label.active   { color: var(--success); }
+.status-dot.standby,  .status-label.standby  { color: var(--warning); }
+.status-dot.inactive, .status-label.inactive { color: var(--inactive); }
+.status-dot.error,    .status-label.error    { color: var(--danger); }
+
+/* ── GPS badge ────────────────────────────────────────────────────── */
+.gps-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.2;
+}
+.badge-label {
+  font-size: 10px;
+  color: var(--text-sec);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.badge-value {
+  font-size: 12px;
+  font-weight: 700;
+}
+.badge-value.ok      { color: var(--success); }
+.badge-value.warning { color: var(--warning); }
+.badge-value.danger  { color: var(--danger); }
+
+/* ── Connection indicators ────────────────────────────────────────── */
+.conn-indicators {
+  display: flex;
+  gap: 6px;
+}
+.conn-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 52px;
+  padding: 6px 4px 5px;
+  border-radius: 6px;
+  background: rgba(239, 35, 60, 0.12);
+  color: #EF233C;
+  transition: background 0.3s, color 0.3s;
+}
+.conn-indicator.ok      { background: rgba(0, 210, 140, 0.18); color: #00D28C; }
+.conn-indicator.warning { background: rgba(255, 128,   0, 0.15); color: #FF8000; }
+.conn-indicator.cellular-action { cursor: pointer; }
+.conn-indicator.cellular-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.conn-svg   { width: 28px; height: 24px; display: block; }
+.conn-indicator .conn-svg rect {
+  opacity: 0.24;
+  transform-box: fill-box;
+  transform-origin: bottom;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.conn-indicator.signal-level-1 .conn-svg rect:nth-child(1),
+.conn-indicator.signal-level-2 .conn-svg rect:nth-child(-n+2),
+.conn-indicator.signal-level-3 .conn-svg rect:nth-child(-n+3),
+.conn-indicator.signal-level-4 .conn-svg rect:nth-child(-n+4) {
+  opacity: 1;
+  animation: signal-breathe 2.2s ease-in-out infinite;
+}
+.conn-indicator.signal-level-0 .conn-svg rect {
+  animation: none;
+  transform: scaleY(0.72);
+}
+.conn-indicator.speed-testing .conn-svg rect {
+  animation: signal-sweep 0.85s ease-in-out infinite;
+}
+.conn-indicator.speed-testing .conn-svg rect:nth-child(2) { animation-delay: 0.08s; }
+.conn-indicator.speed-testing .conn-svg rect:nth-child(3) { animation-delay: 0.16s; }
+.conn-indicator.speed-testing .conn-svg rect:nth-child(4) { animation-delay: 0.24s; }
+.conn-label { font-size: 10px; font-weight: 700; color: inherit; margin-top: 3px; }
+
+@keyframes signal-breathe {
+  0%, 100% { transform: scaleY(0.9); }
+  50% { transform: scaleY(1); }
+}
+
+@keyframes signal-sweep {
+  0%, 100% { opacity: 0.25; transform: scaleY(0.7); }
+  45%, 65% { opacity: 1; transform: scaleY(1); }
+}
+
+/* ── Clock block ──────────────────────────────────────────────────── */
+.clock-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.2;
+  min-width: 100px;
+}
+.clock-time {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+}
+.clock-date {
+  font-size: 11px;
+  color: var(--text-sec);
+  white-space: nowrap;
+}
+
+/* ── Navigation bar ───────────────────────────────────────────────── */
+#nav-bar {
+  display: flex;
+  flex-direction: row;
+  height: var(--nav-height);
+  min-height: var(--nav-height);
+  background: var(--nav);
+  border-top: 1px solid rgba(0, 180, 216, 0.4);
+  flex-shrink: 0;
+}
+
+.nav-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-sec);
+  font-size: 14px;
+  font-weight: 400;
+  cursor: pointer;
+  position: relative;
+  transition: color 0.2s, background 0.2s;
+  touch-action: manipulation;
+  padding: 8px 4px;
+}
+.nav-btn::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 28px;
+  right: 28px;
+  height: 3px;
+  background: transparent;
+  border-radius: 0 0 3px 3px;
+  transition: background 0.2s;
+}
+.nav-btn.active {
+  color: var(--accent);
+  font-weight: 700;
+  background: rgba(0, 180, 216, 0.10);
+}
+.nav-btn.active::after {
+  background: var(--accent);
+}
+
+.exit-btn {
+  flex: 0 0 80px;
+  color: var(--danger);
+  border-left: 1px solid rgba(239, 35, 60, 0.25);
+}
+.exit-btn:hover, .exit-btn:active {
+  background: rgba(239, 35, 60, 0.12);
+  color: var(--danger);
+}
+
+/* ── Exit confirmation dialog ────────────────────────────────────── */
+.exit-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.exit-overlay.hidden {
+  display: none;
+}
+.exit-dialog {
+  background: var(--surface);
+  border: 1px solid rgba(239, 35, 60, 0.4);
+  border-radius: var(--radius);
+  padding: 32px 28px 24px;
+  width: 320px;
+  text-align: center;
+}
+.exit-dialog-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 24px;
+}
+.exit-dialog-actions {
+  display: flex;
+  gap: 12px;
+}
+.exit-dialog-btn {
+  flex: 1;
+  padding: 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.exit-dialog-btn.cancel {
+  background: var(--card);
+  color: var(--text-sec);
+}
+.exit-dialog-btn.confirm {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* ── Dashboard sensor grid ────────────────────────────────────────── */
+.sensor-grid-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  gap: 16px;
+  overflow: hidden;
+}
+
+.sensor-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  flex: 1;
+}
+
+.sensor-card {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 18px 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.card-label {
+  font-size: 13px;
+  color: var(--text-sec);
+}
+.card-value {
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+}
+.card-unit {
+  font-size: 14px;
+  color: var(--text-sec);
+}
+.event-card .card-value {
+  font-size: 16px;
+  font-weight: 400;
+}
+.event-text {
+  font-size: 15px !important;
+  color: var(--text) !important;
+  word-break: break-word;
+}
+
+/* ── Map screen ───────────────────────────────────────────────────── */
+#map-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+#map {
+  position: absolute;
+  inset: 0;
+}
+.map-header {
+  z-index: 10;
+  position: relative;
+}
+
+/* ── Device control grid ──────────────────────────────────────────── */
+.device-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 20px;
+  overflow: hidden;
+}
+
+.device-card {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.device-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.device-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+.device-desc {
+  font-size: 13px;
+  color: var(--text-sec);
+}
+
+/* ── Toggle button ────────────────────────────────────────────────── */
+.toggle-btn {
+  min-width: 90px;
+  height: 44px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+  touch-action: manipulation;
+  flex-shrink: 0;
+}
+.toggle-btn.on {
+  background: var(--success);
+  color: #0a1a10;
+}
+.toggle-btn.off {
+  background: var(--inactive);
+  color: var(--text);
+}
+
+/* ── Settings screen ──────────────────────────────────────────────── */
+.settings-scroll {
+  flex: 1;
+  overflow-y: scroll;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  touch-action: none;
+  overscroll-behavior-y: contain;
+  padding: 20px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.section-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-sec);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+
+.settings-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 8px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+}
+.settings-row-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+.settings-row-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+.settings-row-desc {
+  font-size: 12px;
+  color: var(--text-sec);
+}
+.cellular-status.ok      { color: var(--success); }
+.cellular-status.warning { color: var(--warning); }
+.cellular-status.danger  { color: var(--danger); }
+.settings-row-end {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.settings-divider {
+  height: 1px;
+  background: rgba(0, 180, 216, 0.2);
+}
+
+/* ── Form fields ──────────────────────────────────────────────────── */
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.field-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-sec);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.field-input {
+  background: var(--card);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 15px;
+  color: var(--text);
+  outline: none;
+  width: 100%;
+  caret-color: var(--accent);
+}
+.field-input::placeholder {
+  color: var(--inactive);
+}
+.field-input:focus {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* ── Cellular usage counter ───────────────────────────────────────── */
+.cellular-usage-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.cellular-usage-item {
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--card);
+}
+.cellular-usage-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-sec);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.cellular-usage-value {
+  display: block;
+  margin-top: 6px;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+  word-break: break-word;
+}
+
+/* ── Pill buttons ─────────────────────────────────────────────────── */
+.pill-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: var(--radius-pill);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  touch-action: manipulation;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+.pill-btn.accent   { background: var(--accent);   color: var(--nav); }
+.pill-btn.success  { background: var(--success);  color: #0a1a10; }
+.pill-btn.warning  { background: var(--warning);  color: var(--nav); }
+.pill-btn.danger   { background: var(--danger);   color: var(--text); }
+.pill-btn.inactive { background: var(--inactive); color: var(--text); opacity: 0.6; }
+.pill-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ── Accent button (Save) ─────────────────────────────────────────── */
+.accent-btn {
+  padding: 12px 32px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--nav);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: opacity 0.2s;
+}
+.accent-btn:active { opacity: 0.8; }
+
+.version-text {
+  font-size: 15px !important;
+  text-align: right;
+}
+
+/* ── Scrollbar (minimal on touchscreen) ────────────────────────────── */
+.settings-scroll::-webkit-scrollbar { display: none; }
+.settings-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 180, 216, 0.3);
+  border-radius: 2px;
+}
+
+/* ── GPS indicator — clickable action ────────────────────────────── */
+.conn-indicator.gps-action {
+  cursor: pointer;
+}
+.conn-indicator.gps-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ── GPS status overlay (sub-page) ───────────────────────────────── */
+.gps-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.gps-overlay.hidden {
+  display: none;
+}
+
+.gps-overlay-header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  height: var(--header-height);
+  min-height: var(--header-height);
+  padding: 0 24px;
+  gap: 16px;
+  background: var(--surface);
+  border-bottom: 1px solid rgba(0, 180, 216, 0.3);
+  flex-shrink: 0;
+}
+
+.back-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px 8px 10px;
+  background: var(--card);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+.back-btn:active {
+  background: rgba(0, 180, 216, 0.2);
+}
+.back-btn svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.gps-overlay-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.gps-overlay-content {
+  flex: 1;
+  overflow-y: scroll;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  touch-action: none;
+  overscroll-behavior-y: contain;
+  padding: 20px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gps-overlay-content::-webkit-scrollbar { display: none; }
+
+/* ── GPS status banner ────────────────────────────────────────────── */
+.gps-banner {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 4px;
+}
+.gps-banner-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gps-banner-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-sec);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.gps-banner-status {
+  font-size: 28px;
+  font-weight: 700;
+}
+.gps-banner-status.ok      { color: var(--success); }
+.gps-banner-status.warning { color: var(--warning); }
+.gps-banner-status.danger  { color: var(--danger); }
+
+.gps-banner-icon {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+}
+.gps-banner-icon.ok      { color: var(--success); }
+.gps-banner-icon.warning { color: var(--warning); }
+.gps-banner-icon.danger  { color: var(--danger); }
+
+/* ── GPS metric grid ──────────────────────────────────────────────── */
+.gps-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.gps-metric-card {
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gps-metric-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-sec);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.gps-metric-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+  word-break: break-all;
+}
+.gps-metric-unit {
+  font-size: 12px;
+  color: var(--text-sec);
+}
+
+/* ── GPS coordinate row (full width) ──────────────────────────────── */
+.gps-coord-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.gps-coord-value {
+  font-size: 18px !important;
+}
+
+/* ── Record screen ────────────────────────────────────────────────── */
+.record-layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  overflow: hidden;
+}
+
+.record-left,
+.record-right {
+  padding: 16px 16px 16px 20px;
+  overflow-y: scroll;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  touch-action: none;
+  overscroll-behavior-y: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.record-left::-webkit-scrollbar,
+.record-right::-webkit-scrollbar { display: none; }
+.record-right {
+  padding-left: 10px;
+  border-left: 1px solid rgba(255,255,255,0.06);
+}
+
+/* Session name field in record screen reuses .settings-field */
+.rec-action-row {
+  padding: 12px 0 4px;
+  display: flex;
+  justify-content: center;
+}
+
+.rec-start-btn {
+  width: 100%;
+  padding: 16px;
+  background: var(--success);
+  color: #0a1a10;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+  letter-spacing: 0.02em;
+}
+.rec-start-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.rec-stop-btn {
+  width: 100%;
+  padding: 16px;
+  background: var(--danger);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+/* Toggle switch */
+.rec-toggle {
+  position: relative;
+  display: inline-block;
+  width: 46px;
+  height: 26px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.rec-toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+.rec-toggle-track {
+  position: absolute;
+  inset: 0;
+  background: var(--inactive);
+  border-radius: 13px;
+  transition: background 0.2s;
+}
+.rec-toggle-track::before {
+  content: '';
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  left: 3px;
+  top: 3px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+.rec-toggle input:checked + .rec-toggle-track { background: var(--accent); }
+.rec-toggle input:checked + .rec-toggle-track::before { transform: translateX(20px); }
+
+/* Active recording card */
+.rec-active-card {
+  border: 1px solid rgba(239, 35, 60, 0.35);
+}
+
+.rec-indicator-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0 4px;
+}
+
+.rec-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--danger);
+  flex-shrink: 0;
+  animation: rec-pulse 1.2s ease-in-out infinite;
+}
+@keyframes rec-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+.rec-active-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--danger);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex: 1;
+}
+
+.rec-duration {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.rec-counts-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 4px 0;
+}
+.rec-count-cell {
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  transition: opacity 0.2s;
+}
+.rec-count-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.rec-count-label {
+  font-size: 11px;
+  color: var(--text-sec);
+  text-align: center;
+}
+
+/* Session name shown in active panel */
+.rec-session-name {
+  font-size: 12px;
+  color: var(--text-sec);
+  word-break: break-all;
+  text-align: right;
+  max-width: 55%;
+}
+
+/* Sessions list */
+.rec-sessions-card {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.rec-session-item {
+  padding: 10px 0;
+}
+.rec-session-name-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-all;
+}
+.rec-session-meta {
+  font-size: 12px;
+  color: var(--text-sec);
+  margin-top: 3px;
+}
+
+.rec-no-sessions {
+  display: block;
+  padding: 16px 0;
+  font-size: 13px;
+  color: var(--text-sec);
+  text-align: center;
+}
+
+.rec-refresh-btn {
+  background: none;
+  border: none;
+  color: var(--text-sec);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 0 0 8px;
+  vertical-align: middle;
+  touch-action: manipulation;
+}
+.rec-refresh-btn:hover { color: var(--accent); }
+
+/* Nav Record button — pulse red border when recording */
+.nav-btn.recording {
+  color: var(--danger);
+}
+.nav-btn.recording::after {
+  background: var(--danger);
+  animation: rec-pulse 1.2s ease-in-out infinite;
+}
+
+/* ── On-screen keyboard ───────────────────────────────────────────── */
+.osk-container {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 600;
+  background: #0a0f1c;
+  border-top: 1px solid rgba(0, 180, 216, 0.25);
+  padding: 6px 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: 0 -4px 24px rgba(0,0,0,0.55);
+}
+.osk-container.hidden { display: none; }
+
+.osk-row {
+  display: flex;
+  flex-direction: row;
+  gap: 4px;
+  justify-content: center;
+}
+
+.osk-key {
+  flex: 1;
+  min-width: 0;
+  height: 48px;
+  background: #1c2640;
+  color: var(--text);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-bottom: 2px solid rgba(0,0,0,0.5);
+  border-radius: 6px;
+  font-size: 18px;
+  font-weight: 500;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.08s;
+}
+.osk-key:active {
+  background: #2e3f68;
+  border-bottom-width: 1px;
+}
+
+.osk-key-wide {
+  flex: 1.4;
+}
+.osk-key-sym {
+  flex: 1.3;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-sec);
+  background: #131929;
+}
+.osk-key-space {
+  flex: 4;
+  font-size: 13px;
+  color: var(--text-sec);
+}
+.osk-key-done {
+  flex: 1.6;
+  background: var(--accent);
+  color: var(--nav);
+  font-size: 14px;
+  font-weight: 700;
+  border-color: var(--accent);
+}
+.osk-key-done:active { background: #008fab; }
+
+.osk-key-active {
+  background: #2e3f68;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ── MapLibre overrides ───────────────────────────────────────────── */
+.maplibregl-ctrl-logo { display: none !important; }
+.maplibregl-ctrl-attrib { font-size: 9px; opacity: 0.55; }
+.maplibregl-marker { opacity: 1 !important; }
+
+/* ── Responsive tweaks for narrow screens ─────────────────────────── */
+@media (max-width: 600px) {
+  .sensor-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .sensor-row:first-child .sensor-card:last-child {
+    grid-column: span 2;
+  }
+  .header-right .clock-block { display: none; }
+  .app-title { font-size: 18px; }
+}
+@media (max-width: 400px) {
+  .sensor-row { grid-template-columns: 1fr; }
+  .device-grid { grid-template-columns: 1fr; }
+}
