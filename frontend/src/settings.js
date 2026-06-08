@@ -323,6 +323,13 @@ const Settings = (() => {
     }
   }
 
+  // ── Local IP ───────────────────────────────────────────────────────
+  function _renderLocalIp(s) {
+    const el = document.getElementById('set-local-ip');
+    if (!el) return;
+    el.textContent = s.local_ip || '—';
+  }
+
   // ── Connection indicator helper ────────────────────────────────────
   function _setConn(id, ok, warn = false) {
     const el = document.getElementById(id);
@@ -347,6 +354,7 @@ const Settings = (() => {
     _setConn('ind-set-imu', s.imu_ok);
 
     _renderCellular(s);
+    _renderLocalIp(s);
 
     // IMU calibration row
     const status = document.getElementById('imu-heading-status');

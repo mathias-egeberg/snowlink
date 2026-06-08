@@ -22,6 +22,30 @@ log = logging.getLogger("snowlink.data")
 
 SELFTEST_INTERVAL = 3.0
 
+# Interface name prefixes that belong to the cellular modem — excluded from
+# the local_ip field so only LAN/WiFi addresses are shown.
+_CELLULAR_IFACE_PREFIXES = ("wwan", "usb", "ppp", "rmnet", "qmi")
+
+
+def _get_local_ips() -> str:
+    """Return LAN/WiFi IPv4 address(es), excluding loopback and cellular."""
+    import socket
+    try:
+        import psutil
+        addrs = psutil.net_if_addrs()
+        ips = []
+        for iface in sorted(addrs):
+            if iface == "lo":
+                continue
+            if any(iface.startswith(p) for p in _CELLULAR_IFACE_PREFIXES):
+                continue
+            for addr in addrs[iface]:
+                if addr.family == socket.AF_INET:
+                    ips.append(f"{addr.address} ({iface})")
+        return ", ".join(ips) if ips else ""
+    except Exception:
+        return ""
+
 
 class DataService:
     _instance: Optional["DataService"] = None
@@ -86,6 +110,10 @@ class DataService:
                     )
             except Exception:
                 log.exception("Cellular selftest error")
+            try:
+                state_manager.update(local_ip=_get_local_ips())
+            except Exception:
+                pass
             time.sleep(SELFTEST_INTERVAL)
 
     def _update_cellular_state(self, result, usage: dict) -> None:

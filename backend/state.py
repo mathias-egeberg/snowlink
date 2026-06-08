@@ -84,6 +84,9 @@ class AppState:
     marker_style: str = "snowcat"       # 'snowcat' | 'dot'
     imu_heading_enabled: bool = False
 
+    # ── Local network ─────────────────────────────────────────────────────
+    local_ip: str = ""   # LAN/WiFi IPv4(s), e.g. "192.168.0.126 (wlan0)"
+
     # ── LiDAR placeholder ─────────────────────────────────────────────────
     lidar_available: bool = False
     lidar_point_count: int = 0
