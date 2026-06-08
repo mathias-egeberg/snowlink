@@ -6,9 +6,10 @@
  * POST /api/settings.  IMU status is kept live from the WebSocket.
  */
 const Settings = (() => {
-  let _ntripEnabled     = false;
-  let _markerStyle      = 'snowcat';
+  let _ntripEnabled      = false;
+  let _markerStyle       = 'snowcat';
   let _imuHeadingEnabled = false;
+  let _gnssRateHz        = 5;
   let _loaded            = false;
   let _speedTestRunning  = false;
   const STATE_RENDER_SETTLE_MS = 400;
@@ -42,6 +43,7 @@ const Settings = (() => {
       _ntripEnabled      = data.ntrip?.enabled ?? false;
       _markerStyle       = data.map?.marker_style ?? 'snowcat';
       _imuHeadingEnabled = data.map?.imu_heading_enabled ?? false;
+      _gnssRateHz        = data.gnss?.update_rate_hz ?? 5;
 
       document.getElementById('inp-host').value      = data.ntrip?.host       ?? '';
       document.getElementById('inp-port').value      = data.ntrip?.port       ?? '2101';
@@ -52,6 +54,7 @@ const Settings = (() => {
       _renderNtripBtn();
       _renderMarkerBtn();
       _renderImuHeadingBtn();
+      _renderGnssRateBtn();
       _loaded = true;
     } catch (e) {
       console.error('[Settings] load error', e);
@@ -127,6 +130,31 @@ const Settings = (() => {
     if (!btn) return;
     btn.textContent = _imuHeadingEnabled ? 'Enabled' : 'Disabled';
     btn.className   = `pill-btn ${_imuHeadingEnabled ? 'success' : 'danger'}`;
+  }
+
+  // ── GNSS update rate ───────────────────────────────────────────────
+  function setGnssRate(hz) {
+    _gnssRateHz = hz;
+    _renderGnssRateBtn();
+    API.postSettings({ gnss: { update_rate_hz: hz } })
+      .catch(e => console.error('[Settings] setGnssRate error', e));
+  }
+
+  function _renderGnssRateBtn() {
+    for (const hz of [1, 5, 10]) {
+      const btn = document.getElementById(`btn-gnss-rate-${hz}`);
+      if (!btn) continue;
+      const active = hz === _gnssRateHz;
+      if (!active) {
+        btn.className = 'pill-btn inactive';
+      } else if (hz === 1) {
+        btn.className = 'pill-btn warning';
+      } else if (hz === 5) {
+        btn.className = 'pill-btn success';
+      } else {
+        btn.className = 'pill-btn danger';
+      }
+    }
   }
 
   async function calibrateImu() {
@@ -376,6 +404,7 @@ const Settings = (() => {
     toggleMarkerStyle,
     toggleImuHeading,
     calibrateImu,
+    setGnssRate,
     resetCellularUsage,
     runCellularSpeedTest,
   };

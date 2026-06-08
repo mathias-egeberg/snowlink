@@ -7,7 +7,7 @@ from backend.services.cellular_usage_service import (
     CellularUsageService,
 )
 from backend.services.selftest import cellular_selftest
-from backend.services.settings_service import SettingsService, VALID_MARKER_STYLES
+from backend.services.settings_service import SettingsService, VALID_MARKER_STYLES, VALID_GNSS_RATES
 from backend.state import state_manager
 
 router = APIRouter()
@@ -60,6 +60,14 @@ async def post_settings(payload: dict = Body(...)) -> dict:
                 m["imu_yaw_zero_deg"] = None
             elif isinstance(zero, (int, float)):
                 m["imu_yaw_zero_deg"] = float(zero) % 360.0
+
+    # ── GNSS section ──────────────────────────────────────────────────────
+    gnss_in = payload.get("gnss")
+    if isinstance(gnss_in, dict):
+        g = data.setdefault("gnss", {})
+        rate = gnss_in.get("update_rate_hz")
+        if rate in VALID_GNSS_RATES:
+            g["update_rate_hz"] = rate
 
     SettingsService._validate_loaded_data(data)
     SettingsService.save()

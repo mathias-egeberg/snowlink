@@ -27,7 +27,15 @@ _DEFAULTS: dict = {
         'imu_heading_enabled': False,
         'imu_yaw_zero_deg': None,
     },
+    'gnss': {
+        # Receiver update rate applied via UBX-CFG-RATE at connect.
+        # 5 Hz recommended for RTK+IMU fusion. 10 Hz only after confirming
+        # timestamping, logging, correction input, and CPU load are stable.
+        'update_rate_hz': 5,   # 1 | 5 | 10
+    },
 }
+
+VALID_GNSS_RATES = {1, 5, 10}
 
 VALID_MARKER_STYLES = {'snowcat', 'dot'}
 
@@ -96,8 +104,15 @@ class SettingsService:
 
         zero = map_settings.get('imu_yaw_zero_deg')
         if zero is None:
-            return
-        try:
-            map_settings['imu_yaw_zero_deg'] = float(zero) % 360.0
-        except (TypeError, ValueError):
-            map_settings['imu_yaw_zero_deg'] = _DEFAULTS['map']['imu_yaw_zero_deg']
+            pass
+        else:
+            try:
+                map_settings['imu_yaw_zero_deg'] = float(zero) % 360.0
+            except (TypeError, ValueError):
+                map_settings['imu_yaw_zero_deg'] = _DEFAULTS['map']['imu_yaw_zero_deg']
+
+        if not isinstance(data.get('gnss'), dict):
+            data['gnss'] = copy.deepcopy(_DEFAULTS['gnss'])
+        gnss_settings = data['gnss']
+        if gnss_settings.get('update_rate_hz') not in VALID_GNSS_RATES:
+            gnss_settings['update_rate_hz'] = _DEFAULTS['gnss']['update_rate_hz']

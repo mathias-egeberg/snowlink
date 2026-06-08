@@ -2,18 +2,22 @@
 Recording service — logs selected sensor streams to CSV files.
 
 Each session creates exactly one timestamped folder under logs/ and writes:
-  gnss_raw.csv      lat, lon, alt, fix, RTK, sats, HDOP         ~1 Hz
-  imu_heading.csv   yaw, heading, calibrated flag                ~10 Hz
-  imu_raw.csv       accel, gyro + optional roll/pitch/yaw        ~95-100 Hz
+  gnss_raw.csv      lat, lon, alt, fix, RTK, sats, HDOP, accuracy  ~1-10 Hz
+  imu_heading.csv   yaw, heading, calibrated flag                   ~10 Hz
+  imu_raw.csv       accel, gyro + optional roll/pitch/yaw           ~95-100 Hz
   system_status.csv events + diagnostics from all sensors
 
-GNSS logging is event-driven: the GPS reader pushes GNSSMeasurement objects
-to gnss_queue; the recording loop drains it completely each tick.
+Both GNSS and IMU raw logging are event-driven via dedicated drain threads:
+  - _gnss_drain_loop: drains gnss_queue, writes gnss_raw.csv, tracks dt stats.
+  - _raw_imu_loop:    drains imu_raw_queue, writes imu_raw.csv, tracks dt stats.
 
-IMU raw logging is event-driven: the IMU reader pushes IMURawMeasurement
-objects to imu_raw_queue; a dedicated drain thread writes them to CSV.
+IMU heading and system event logging run in the shared 10 Hz _loop.
 
-Both queues are drained of stale data at the start of each session so
+Both drain threads start at __init__ time and run for the lifetime of the
+process.  The write gate is the corresponding writer being non-None (set by
+start(), cleared by stop()).
+
+Queues are drained of stale data at the start of each session so
 timestamp ranges are always consistent within a session folder.
 """
 from __future__ import annotations
@@ -90,8 +94,16 @@ class RecordingService:
         self._max_raw_imu_dt      = 0.0
         self._mean_raw_imu_dt     = 0.0
         self._ts_mono_fixes       = 0
+        # GNSS drain-thread stats (read by stop())
+        self._gnss_dup_ts         = 0
+        self._gnss_dt_max         = 0.0
+        self._gnss_dt_mean        = 0.0
+        self._gnss_dt_min         = 0.0
 
-        # Always-running drain thread writes imu_raw_queue to CSV while recording.
+        # Always-running drain threads write queues to CSV while recording.
+        threading.Thread(
+            target=self._gnss_drain_loop, daemon=True, name="gnss-drain"
+        ).start()
         threading.Thread(
             target=self._raw_imu_loop, daemon=True, name="imu-raw-drain"
         ).start()
@@ -100,11 +112,13 @@ class RecordingService:
 
     def start(self, session_name: str, streams: list[str]) -> dict:
         from backend.services.config_service import ConfigService
+        from backend.services.settings_service import SettingsService
         from backend.services.imu_raw import reset_diagnostics, imu_raw_queue
         from backend.services.gps_service import reset_gnss_diagnostics, gnss_queue
 
         cfg_imu  = ConfigService.get_imu()
         cfg_gnss = ConfigService.get_gnss()
+        gnss_rate_hz = SettingsService.load().get("gnss", {}).get("update_rate_hz", 5)
         reset_diagnostics()
         reset_gnss_diagnostics()
 
@@ -130,14 +144,21 @@ class RecordingService:
             self._imu_raw_count   = 0
             self._event_count     = 0
             self._gap_warnings    = 0
+            self._gnss_dup_ts     = 0
+            self._gnss_dt_max     = 0.0
+            self._gnss_dt_mean    = 0.0
+            self._gnss_dt_min     = 0.0
 
             if "gnss" in self._streams:
                 self._gnss_file   = open(session_dir / "gnss_raw.csv", "w", newline="")
                 self._gnss_writer = csv.writer(self._gnss_file)
+                # Columns: system timestamps first, then GNSS-source timing,
+                # then position, fix quality, accuracy, and metadata.
                 self._gnss_writer.writerow([
                     "timestamp_monotonic", "timestamp_unix",
+                    "gnss_utc_time", "source_protocol",
                     "lat", "lon", "altitude_m",
-                    "fix_quality", "rtk_status",
+                    "fix_quality", "fix_type_text",
                     "h_acc_m", "v_acc_m",
                     "num_satellites", "hdop",
                     "acc_source",
@@ -202,9 +223,9 @@ class RecordingService:
                     "INFO",
                     f"GNSS CONFIG: port={gnss_port_cfg} "
                     f"baud={cfg_gnss.get('baudrate', 115200)} "
-                    f"log_rate_hz={cfg_gnss.get('log_rate_hz', 1)} "
+                    f"configured_rate_hz={gnss_rate_hz} "
                     f"protocol={cfg_gnss.get('protocol', 'auto')} "
-                    "(ZED-F9P output rate configured externally in u-center2)",
+                    "(CFG-RATE applied at connect; verify with gnss_raw.csv dt stats)",
                 )
 
         state_manager.update(
@@ -228,34 +249,38 @@ class RecordingService:
 
     def stop(self) -> dict:
         from backend.services.imu_raw import imu_raw_queue as _irq
+        from backend.services.gps_service import gnss_queue as _gq
 
-        # Phase 1: stop the main recording loop; start the shutdown drain window.
-        # The raw IMU drain thread is NOT gated on _active — it writes while
-        # self._imu_raw_writer is not None, so it keeps running here.
+        # Phase 1: stop the main recording loop; drain threads keep running
+        # until their respective writers are closed in Phase 4.
         with self._lock:
             if not self._active:
                 return {"ok": False, "error": "Not recording"}
             self._active = False
             session  = self._session_dir.name if self._session_dir else ""
             elapsed  = time.monotonic() - self._session_start_t
-            gnss_count  = self._gnss_count
             imu_count   = self._imu_count
             event_count = self._event_count
 
-        # Phase 2: wait for the drain thread to flush all remaining raw IMU frames.
+        # Phase 2: wait for both drain queues to empty.
         drain_deadline = time.monotonic() + 3.0
         while time.monotonic() < drain_deadline:
-            if _irq.empty():
+            if _irq.empty() and _gq.empty():
                 break
             time.sleep(0.005)
-        raw_queue_remaining = _irq.qsize()
+        raw_queue_remaining  = _irq.qsize()
+        gnss_queue_remaining = _gq.qsize()
 
-        # Phase 3: read final IMU raw counters (drain thread may have written more
-        # rows after Phase 1), then do a final flush before reading imu_raw_count.
+        # Phase 3: read final counters; final flush before reading counts.
         with self._lock:
             if self._imu_raw_file:
                 try:
                     self._imu_raw_file.flush()
+                except Exception:
+                    pass
+            if self._gnss_file:
+                try:
+                    self._gnss_file.flush()
                 except Exception:
                     pass
             imu_raw_count       = self._imu_raw_count
@@ -264,6 +289,11 @@ class RecordingService:
             max_raw_imu_dt      = self._max_raw_imu_dt
             mean_raw_imu_dt     = self._mean_raw_imu_dt
             ts_mono_fixes       = self._ts_mono_fixes
+            gnss_count          = self._gnss_count
+            gnss_dup_ts         = self._gnss_dup_ts
+            gnss_dt_max         = self._gnss_dt_max
+            gnss_dt_mean        = self._gnss_dt_mean
+            gnss_dt_min         = self._gnss_dt_min
 
         raw_hz  = imu_raw_count / elapsed if elapsed > 0 else 0.0
         head_hz = imu_count     / elapsed if elapsed > 0 else 0.0
@@ -275,7 +305,9 @@ class RecordingService:
         )
         from backend.services.imu_service import connected_port, connected_baud
         from backend.services.gps_service import build_gnss_diagnostic_report
+        from backend.services.settings_service import SettingsService
 
+        gnss_rate_hz = SettingsService.load().get("gnss", {}).get("update_rate_hz", 5)
         frame_type_report = build_frame_type_report()
         frame_hex_report  = build_frame_hex_report()
         gnss_diag         = build_gnss_diagnostic_report(elapsed)
@@ -341,21 +373,35 @@ class RecordingService:
         self._write_sys_event("INFO", f"GNSS SUMMARY: {gnss_diag}")
         self._write_sys_event(
             "INFO",
-            f"GNSS LOGGED: {gnss_count} rows (~{gnss_hz:.2f}Hz) over {elapsed:.1f}s",
+            f"GNSS LOGGED: {gnss_count} rows (~{gnss_hz:.2f}Hz) over {elapsed:.1f}s "
+            f"gnss_queue_remaining={gnss_queue_remaining}",
+        )
+        self._write_sys_event(
+            "INFO",
+            f"GNSS TIMESTAMP QUALITY: "
+            f"configured_rate={gnss_rate_hz}Hz "
+            f"dup_timestamps={gnss_dup_ts} "
+            f"dt_mean={gnss_dt_mean:.4f}s "
+            f"dt_min={gnss_dt_min:.4f}s "
+            f"dt_max={gnss_dt_max:.4f}s"
+            + (" WARN:duplicate_timestamps_detected" if gnss_dup_ts > 0 else ""),
         )
 
-        expected_gnss = elapsed * 1.0
+        # Warn if measured GNSS rate is well below the configured rate.
+        expected_gnss = elapsed * gnss_rate_hz
         if gnss_count < expected_gnss * 0.8:
             self._write_sys_event(
                 "WARN",
-                f"GNSS row count low ({gnss_count} vs ~{expected_gnss:.0f} expected). "
-                "Possible causes: (1) ZED-F9P output rate < 1Hz — check u-center2 GGA settings; "
-                "(2) Wrong baud rate — GNSS SUMMARY shows actual bytes received; "
+                f"GNSS row count low ({gnss_count} vs ~{expected_gnss:.0f} expected "
+                f"at {gnss_rate_hz}Hz). Possible causes: "
+                "(1) ZED-F9P output rate not matching configured rate — CFG-RATE may not have "
+                "been acknowledged (check u-center2); "
+                "(2) Wrong baud rate; "
                 "(3) GGA messages not enabled on this port.",
             )
 
-        # Phase 4: close all files (sets _imu_raw_writer to None, which stops
-        # the drain thread from writing any further stale frames).
+        # Phase 4: close all files (sets writers to None, stopping drain threads
+        # from writing any further stale frames).
         with self._lock:
             self._close_files()
 
@@ -373,12 +419,13 @@ class RecordingService:
             "gap_warnings":      gap_warnings,
         }
 
-        # Print a human-readable summary to the application log
         warnings = []
         if imu_raw_count == 0:
             warnings.append("imu_raw=0")
         if gnss_count < expected_gnss * 0.8:
             warnings.append(f"gnss_low({gnss_count})")
+        if gnss_dup_ts > 0:
+            warnings.append(f"gnss_dup_ts={gnss_dup_ts}")
         warn_str = ", ".join(warnings) if warnings else "none"
 
         log.info(
@@ -420,6 +467,106 @@ class RecordingService:
                 "total_size_bytes": total,
             })
         return sessions
+
+    # ── GNSS drain thread (always running) ───────────────────────────────
+
+    def _gnss_drain_loop(self) -> None:
+        """
+        Drains gnss_queue continuously; writes every measurement to gnss_raw.csv.
+        Write gate is self._gnss_writer (not self._active), so the drain
+        continues through the shutdown window after stop() sets _active=False,
+        letting stop() wait for the queue to empty before closing the file.
+        Flushes every 10 rows to avoid per-row SD card syncs at high GNSS rates.
+        Tracks inter-epoch dt statistics for GNSS TIMESTAMP QUALITY report.
+        """
+        from backend.services.gps_service import gnss_queue
+
+        prev_t_mono: Optional[float] = None
+        was_active   = False
+
+        gnss_written  = 0
+        flush_count   = 0
+        dt_sum        = 0.0
+        dt_count      = 0
+        dt_max        = 0.0
+        dt_min        = float("inf")
+        dup_count     = 0
+        next_state_push = time.time() + 1.0
+
+        while True:
+            try:
+                m = gnss_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
+            with self._lock:
+                active = self._active
+                writer = self._gnss_writer
+
+            # Reset per-session counters when a new recording starts.
+            if active and not was_active:
+                gnss_written    = 0
+                flush_count     = 0
+                dt_sum          = 0.0
+                dt_count        = 0
+                dt_max          = 0.0
+                dt_min          = float("inf")
+                dup_count       = 0
+                prev_t_mono     = None
+                next_state_push = time.time() + 1.0
+            was_active = active
+
+            if writer is None:
+                continue
+
+            # Track inter-epoch dt for timestamp quality validation.
+            if prev_t_mono is not None:
+                dt = m.timestamp_monotonic - prev_t_mono
+                if dt < 1e-6:
+                    dup_count += 1
+                else:
+                    dt_sum   += dt
+                    dt_count += 1
+                    if dt > dt_max: dt_max = dt
+                    if dt < dt_min: dt_min = dt
+            prev_t_mono = m.timestamp_monotonic
+
+            with self._lock:
+                if self._gnss_writer:
+                    self._gnss_writer.writerow([
+                        f"{m.timestamp_monotonic:.6f}",
+                        f"{m.timestamp_unix:.6f}",
+                        m.gnss_utc_time,
+                        m.source_protocol,
+                        f"{m.lat:.9f}",
+                        f"{m.lon:.9f}",
+                        f"{m.altitude_m:.3f}",
+                        m.fix_quality,
+                        m.fix_type_text,
+                        f"{m.h_acc_m:.4f}" if m.h_acc_m is not None else "",
+                        f"{m.v_acc_m:.4f}" if m.v_acc_m is not None else "",
+                        m.satellites,
+                        f"{m.hdop:.2f}",
+                        m.acc_source,
+                    ])
+                    gnss_written += 1
+                    # Flush every 10 rows; stop() does a final flush before close.
+                    if gnss_written % 10 == 0:
+                        self._gnss_file.flush()
+                        flush_count += 1
+                    self._gnss_count  = gnss_written
+                    self._gnss_dup_ts = dup_count
+                    self._gnss_dt_max  = dt_max
+                    self._gnss_dt_mean = dt_sum / dt_count if dt_count > 0 else 0.0
+                    self._gnss_dt_min  = dt_min if dt_count > 0 else 0.0
+
+            # Push live count to state (1 Hz)
+            now_t = time.time()
+            if now_t >= next_state_push:
+                with self._lock:
+                    gc = self._gnss_count
+                state_manager.update(recording_gnss_count=gc)
+                next_state_push = now_t + 1.0
 
     # ── High-rate IMU raw drain (always running) ──────────────────────────
 
@@ -530,7 +677,7 @@ class RecordingService:
                     self._ts_mono_fixes   = ts_mono_fixes
             window_samples += 1
 
-            # Frequency check every 5 s — uses written count, no undefined vars
+            # Frequency check every 5 s
             now_m = time.monotonic()
             if now_m >= next_freq_check:
                 elapsed_w = now_m - window_start
@@ -550,18 +697,15 @@ class RecordingService:
                 state_manager.update(recording_imu_raw_count=raw_written)
                 next_state_push = now_t + 1.0
 
-    # ── Main poll loop: heading, GNSS queue drain, system events (10 Hz) ──
+    # ── Main poll loop: heading and system events (10 Hz) ─────────────────
 
     def _loop(self) -> None:
-        from backend.services.gps_service import gnss_queue
-
         # Initialise last_event to the current state so we only log events
-        # that happen AFTER this recording starts (avoids logging stale boot
-        # messages like "Not found: GPS" that were set before the session).
+        # that happen AFTER this recording starts.
         s = state_manager.get_snapshot()
         last_yaw   = None
         last_event = s.get("last_event", "")
-        gnss_count = imu_count = event_count = 0
+        imu_count = event_count = 0
         next_state_push = time.time() + _STATE_UPDATE_INTERVAL
 
         while True:
@@ -574,34 +718,6 @@ class RecordingService:
                 s      = state_manager.get_snapshot()
                 t_mono = time.monotonic()
                 t_unix = time.time()
-
-                # ── GNSS: drain queue fully each tick (event-driven, no poll lag)
-                # No downsampling — every valid GGA is logged.
-                # The ZED-F9P naturally limits output to ~1 Hz externally.
-                if "gnss" in streams:
-                    while True:
-                        try:
-                            m = gnss_queue.get_nowait()
-                        except queue.Empty:
-                            break
-                        with self._lock:
-                            if self._gnss_writer:
-                                self._gnss_writer.writerow([
-                                    f"{m.timestamp_monotonic:.6f}",
-                                    f"{m.timestamp_unix:.6f}",
-                                    f"{m.lat:.9f}",
-                                    f"{m.lon:.9f}",
-                                    f"{m.altitude_m:.3f}",
-                                    m.fix_quality,
-                                    m.fix_type_text,
-                                    f"{m.h_acc_m:.4f}" if m.h_acc_m is not None else "",
-                                    f"{m.v_acc_m:.4f}" if m.v_acc_m is not None else "",
-                                    m.satellites,
-                                    f"{m.hdop:.2f}",
-                                    m.acc_source,
-                                ])
-                                self._gnss_file.flush()
-                        gnss_count += 1
 
                 # ── IMU heading (~10 Hz via state change detection) ───────
                 if "imu" in streams and s["imu_yaw_valid"]:
@@ -636,12 +752,10 @@ class RecordingService:
                 now = time.time()
                 if now >= next_state_push:
                     state_manager.update(
-                        recording_gnss_count=gnss_count,
                         recording_imu_count=imu_count,
                         recording_event_count=event_count,
                     )
                     with self._lock:
-                        self._gnss_count  = gnss_count
                         self._imu_count   = imu_count
                         self._event_count = event_count
                     next_state_push = now + _STATE_UPDATE_INTERVAL

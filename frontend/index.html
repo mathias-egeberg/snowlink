@@ -380,6 +380,34 @@
         </div>
       </div>
 
+      <!-- GNSS ---------------------------------------------------------- -->
+      <div class="section-label">GNSS</div>
+      <div class="settings-card">
+
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-title">Update Rate</span>
+            <span class="settings-row-desc">Applied via UBX-CFG-RATE at receiver connect</span>
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button id="btn-gnss-rate-1"  class="pill-btn inactive" onclick="Settings.setGnssRate(1)">1 Hz</button>
+            <button id="btn-gnss-rate-5"  class="pill-btn success"  onclick="Settings.setGnssRate(5)">5 Hz</button>
+            <button id="btn-gnss-rate-10" class="pill-btn inactive" onclick="Settings.setGnssRate(10)">10 Hz</button>
+          </div>
+        </div>
+
+        <div class="settings-divider"></div>
+
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-title">Rate Guide</span>
+            <span class="settings-row-desc">5 Hz — recommended for normal RTK+IMU fusion</span>
+            <span class="settings-row-desc">10 Hz — advanced: only after confirming timestamping, logging, correction input, and CPU load are stable</span>
+          </div>
+        </div>
+
+      </div><!-- /gnss card -->
+
       <!-- CELLULAR ------------------------------------------------------ -->
       <div class="section-label">CELLULAR</div>
       <div class="settings-card">

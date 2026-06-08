@@ -18,6 +18,19 @@ Protocol (gnss.protocol in config.yaml):
   "nmea"  – NMEA GGA only; use fix-type fallback accuracy table.
   "ubx"   – send UBX-CFG-MSG commands on connect, expect UBX output.
 
+Update rate (gnss.update_rate_hz in settings.json, default 5):
+  Applied at connect via UBX-CFG-RATE regardless of protocol setting.
+  Supported values: 1 Hz (1000 ms), 5 Hz (200 ms), 10 Hz (100 ms).
+
+Timestamp handling (NMEA mode):
+  Each GGA sentence contains a UTC time field (HHMMSS.ss).  The receiver
+  stamps each epoch independently, so at 5 Hz consecutive GGA sentences
+  carry times like 12:35:19.00, 12:35:19.20, 12:35:19.40.
+  We anchor this GNSS UTC time to the system clock to derive a proper
+  per-epoch timestamp_unix/timestamp_monotonic instead of reusing the
+  single time.monotonic() captured when ser.read() returned (which would
+  assign the same timestamp to all epochs batched in one read call).
+
 Accuracy values in gnss_raw.csv:
   UBX-NAV-PVT:  hAcc / vAcc from receiver  → acc_source=receiver_reported
   NMEA GGA:     per-fix-type fallback table → acc_source=estimated_from_fix_type
@@ -42,7 +55,7 @@ from backend.services.selftest import gps_selftest
 
 log = logging.getLogger("snowlink.gps")
 
-SELFTEST_INTERVAL    = 3.0
+SELFTEST_INTERVAL     = 3.0
 _UBX_FALLBACK_TIMEOUT = 2.0   # s: if no NAV-PVT arrives, fall back to NMEA
 
 _FIX_TABLE: Dict[int, Tuple[bool, bool, str]] = {
@@ -65,6 +78,9 @@ _ACC_FALLBACK: Dict[int, Tuple[float, float]] = {
     6: (5.00, 10.0),   # Dead reckoning
 }
 
+# measRate_ms for each supported update rate.
+_GNSS_RATE_TABLE: Dict[int, int] = {1: 1000, 5: 200, 10: 100}
+
 
 # ── GNSS measurement type ─────────────────────────────────────────────────────
 
@@ -83,6 +99,10 @@ class GNSSMeasurement:
     h_acc_m:             Optional[float] = None  # horizontal accuracy 1σ (m)
     v_acc_m:             Optional[float] = None  # vertical accuracy 1σ (m)
     acc_source:          str = "unavailable"     # receiver_reported | estimated_from_fix_type | unavailable
+    # Per-epoch timing fields — used by recording_service for gnss_raw.csv
+    gnss_utc_time:       str = ""               # NMEA time field e.g. "123519.20"; empty for UBX
+    source_protocol:     str = "nmea"           # nmea | ubx
+    itow_ms:             Optional[int] = None   # UBX iTOW (ms since GPS week start)
 
 
 # ── Shared queue (GPS reader → RecordingService) ──────────────────────────────
@@ -106,6 +126,12 @@ _diag_rtk_float_count:   int = 0
 _diag_other_fix_count:   int = 0
 _diag_max_gap_s:         float = 0.0
 _diag_last_emit_t:       float = 0.0
+# Timestamp quality counters
+_diag_configured_rate_hz: int   = 5    # requested rate; set by _apply_gnss_rate
+_diag_dt_sum:             float = 0.0  # sum of consecutive inter-epoch deltas
+_diag_dt_count:           int   = 0
+_diag_dt_min:             float = float("inf")
+_diag_dup_ts_count:       int   = 0    # consecutive timestamps with dt < 1 µs
 
 
 def reset_gnss_diagnostics() -> None:
@@ -114,6 +140,7 @@ def reset_gnss_diagnostics() -> None:
     global _diag_valid_gga, _diag_invalid_gga
     global _diag_rtk_fixed_count, _diag_rtk_float_count, _diag_other_fix_count
     global _diag_max_gap_s, _diag_last_emit_t
+    global _diag_dt_sum, _diag_dt_count, _diag_dt_min, _diag_dup_ts_count
     _diag_bytes_received  = 0
     _diag_protocol_used   = "nmea"
     _diag_sentences_by_type.clear()
@@ -126,23 +153,42 @@ def reset_gnss_diagnostics() -> None:
     _diag_other_fix_count = 0
     _diag_max_gap_s       = 0.0
     _diag_last_emit_t     = 0.0
+    _diag_dt_sum          = 0.0
+    _diag_dt_count        = 0
+    _diag_dt_min          = float("inf")
+    _diag_dup_ts_count    = 0
 
 
 def build_gnss_diagnostic_report(elapsed_s: float) -> str:
     """Multi-field GNSS diagnostics string for system_status.csv."""
-    rate_hz   = _diag_valid_gga / elapsed_s if elapsed_s > 0 else 0.0
-    nmea_str  = " ".join(f"{k}={v}" for k, v in sorted(_diag_sentences_by_type.items()))
-    ubx_str   = " ".join(f"{k}={v}" for k, v in sorted(_diag_ubx_msg_counts.items()))
-    acc_str   = " ".join(f"{k}={v}" for k, v in sorted(_diag_acc_source_counts.items()))
+    rate_hz    = _diag_valid_gga / elapsed_s if elapsed_s > 0 else 0.0
+    mean_dt    = _diag_dt_sum / _diag_dt_count if _diag_dt_count > 0 else 0.0
+    dt_min_s   = _diag_dt_min if _diag_dt_count > 0 else 0.0
+    dt_max_s   = _diag_max_gap_s
+
+    exp_dt     = 1.0 / _diag_configured_rate_hz if _diag_configured_rate_hz > 0 else 1.0
+    rate_ok    = mean_dt > 0 and abs(mean_dt - exp_dt) / exp_dt < 0.30
+    warn_rate  = "" if (rate_ok or mean_dt == 0) else (
+        f" WARN:rate_mismatch(configured={_diag_configured_rate_hz}Hz"
+        f" mean_dt={mean_dt:.3f}s)"
+    )
+    warn_dup   = f" WARN:duplicate_timestamps={_diag_dup_ts_count}" if _diag_dup_ts_count > 0 else ""
+
+    nmea_str   = " ".join(f"{k}={v}" for k, v in sorted(_diag_sentences_by_type.items()))
+    ubx_str    = " ".join(f"{k}={v}" for k, v in sorted(_diag_ubx_msg_counts.items()))
+    acc_str    = " ".join(f"{k}={v}" for k, v in sorted(_diag_acc_source_counts.items()))
     return (
+        f"configured_rate={_diag_configured_rate_hz}Hz "
+        f"measured_rate={rate_hz:.2f}Hz "
+        f"dt_mean={mean_dt:.4f}s dt_min={dt_min_s:.4f}s dt_max={dt_max_s:.4f}s "
+        f"dup_timestamps={_diag_dup_ts_count}{warn_dup}{warn_rate} "
         f"protocol={_diag_protocol_used} "
         f"port={_diag_port!r} baud={_diag_baudrate} "
         f"bytes_rx={_diag_bytes_received} "
-        f"measurements={_diag_valid_gga} (~{rate_hz:.2f}Hz) "
+        f"measurements={_diag_valid_gga} "
         f"rtk_fixed={_diag_rtk_fixed_count} rtk_float={_diag_rtk_float_count} "
         f"other_fix={_diag_other_fix_count} "
         f"acc_source=[{acc_str}] "
-        f"max_gap={_diag_max_gap_s:.2f}s "
         f"nmea_types=[{nmea_str}] "
         f"ubx_types=[{ubx_str}]"
     )
@@ -166,6 +212,18 @@ def _build_ubx_cfg_msg(msg_class: int, msg_id: int, rate: int) -> bytes:
     """
     payload = bytes([msg_class, msg_id, 0, rate, 0, 0, 0, 0])
     ck_data = bytes([0x06, 0x01, len(payload), 0]) + payload
+    ck_a, ck_b = _ubx_ck(ck_data)
+    return b"\xb5\x62" + ck_data + bytes([ck_a, ck_b])
+
+
+def _build_ubx_cfg_rate(meas_rate_ms: int, nav_rate: int = 1) -> bytes:
+    """
+    Build a UBX-CFG-RATE command (class 0x06, id 0x08).
+    Sets the receiver measurement period (measRate_ms) and nav solution rate.
+    timeRef=1 (GPS time).  Works regardless of NMEA/UBX output protocol.
+    """
+    payload  = struct.pack("<HHH", meas_rate_ms, nav_rate, 1)
+    ck_data  = bytes([0x06, 0x08]) + struct.pack("<H", len(payload)) + payload
     ck_a, ck_b = _ubx_ck(ck_data)
     return b"\xb5\x62" + ck_data + bytes([ck_a, ck_b])
 
@@ -306,7 +364,14 @@ class GpsService:
         global _diag_bytes_received
 
         from backend.services.config_service import ConfigService
+        from backend.services.settings_service import SettingsService
+
         protocol = ConfigService.get_gnss().get("protocol", "auto").lower()
+        rate_hz  = SettingsService.load().get("gnss", {}).get("update_rate_hz", 5)
+
+        # Configure measurement rate on the receiver first, then optionally
+        # enable UBX messages.  CFG-RATE works regardless of output protocol.
+        self._apply_gnss_rate(ser, rate_hz)
 
         if protocol == "ubx":
             self._enable_ubx_output(ser)
@@ -326,6 +391,9 @@ class GpsService:
                 _diag_bytes_received += len(chunk)
                 buf += chunk
 
+                # Capture system time at the moment of this read.  For UBX
+                # frames this is used directly.  For NMEA, _parse_gga()
+                # replaces it with the receiver's per-epoch UTC time.
                 t_mono = time.monotonic()
                 t_unix = time.time()
 
@@ -372,6 +440,29 @@ class GpsService:
             except Exception:
                 log.warning("GNSS: failed to enable %s via UBX-CFG-MSG", name)
 
+    # ── UBX-CFG-RATE application ──────────────────────────────────────────
+
+    def _apply_gnss_rate(self, ser, rate_hz: int) -> None:
+        """
+        Send UBX-CFG-RATE to set the ZED-F9P measurement period.
+        Called regardless of protocol; logs a warning on failure but does not
+        raise — the service continues with whatever rate was previously set.
+        """
+        global _diag_configured_rate_hz
+        meas_ms = _GNSS_RATE_TABLE.get(rate_hz, 200)
+        _diag_configured_rate_hz = rate_hz
+        cmd = _build_ubx_cfg_rate(meas_ms)
+        try:
+            ser.write(cmd)
+            time.sleep(0.05)
+            log.info("GNSS: set update rate to %d Hz (measRate=%d ms)", rate_hz, meas_ms)
+        except Exception:
+            log.warning(
+                "GNSS: failed to send UBX-CFG-RATE for %d Hz — "
+                "receiver may keep previous rate; verify with u-center2",
+                rate_hz,
+            )
+
     # ── UBX frame dispatcher ──────────────────────────────────────────────
 
     def _handle_ubx(
@@ -399,6 +490,7 @@ class GpsService:
         if len(payload) < 84:
             return
 
+        itow_ms  = struct.unpack_from("<I", payload,  0)[0]   # ms since GPS week
         fix_type = payload[20]
         flags    = payload[21]
         num_sv   = payload[23]
@@ -449,6 +541,9 @@ class GpsService:
             satellites=num_sv, hdop=self._last_hdop,
             h_acc_m=h_acc, v_acc_m=v_acc,
             acc_source=acc_source,
+            gnss_utc_time="",        # iTOW is carried separately; not in HHMMSS format
+            source_protocol="ubx",
+            itow_ms=itow_ms,
         )
 
         _diag_protocol_used  = "mixed" if _diag_sentences_by_type else "ubx"
@@ -511,6 +606,35 @@ class GpsService:
             _diag_invalid_gga += 1
             return None
 
+        # ── Per-epoch timestamp from NMEA UTC time field ─────────────────────
+        # GGA field[1] carries HHMMSS.ss (e.g. "123519.20" for 12:35:19.200 UTC).
+        # At 5 Hz the receiver stamps successive epochs with unique sub-second
+        # times.  Anchoring to the system clock gives correct per-epoch
+        # timestamp_unix and timestamp_monotonic even when multiple GGA sentences
+        # are returned by a single ser.read(4096) call (where t_mono/t_unix would
+        # otherwise be identical for all of them).
+        gnss_utc_time = parts[1] if len(parts) > 1 else ""
+        gnss_ts_unix  = t_unix
+        gnss_ts_mono  = t_mono
+        if len(gnss_utc_time) >= 6:
+            try:
+                hh = int(gnss_utc_time[0:2])
+                mm = int(gnss_utc_time[2:4])
+                ss = float(gnss_utc_time[4:])
+                gnss_utc_s = hh * 3600 + mm * 60 + ss
+                # Anchor to current system day (UTC midnight).
+                midnight   = t_unix - (t_unix % 86400)
+                candidate  = midnight + gnss_utc_s
+                # Day-rollover guard: adjust if offset > 12 h.
+                if abs(candidate - t_unix) > 43200:
+                    candidate += 86400 if candidate < t_unix else -86400
+                # Monotonic equivalent keeps the mono↔unix offset constant so
+                # relative spacing between epochs is preserved exactly.
+                gnss_ts_unix = candidate
+                gnss_ts_mono = candidate + (t_mono - t_unix)
+            except (ValueError, IndexError):
+                pass   # fall back to read-time timestamp
+
         ok, warn, text = _FIX_TABLE.get(fq, (False, False, "Unknown"))
 
         satellites = 0
@@ -567,13 +691,15 @@ class GpsService:
             acc_source    = "unavailable"
 
         return GNSSMeasurement(
-            timestamp_monotonic=t_mono,
-            timestamp_unix=t_unix,
+            timestamp_monotonic=gnss_ts_mono,
+            timestamp_unix=gnss_ts_unix,
             lat=lat, lon=lon, altitude_m=altitude_m,
             fix_quality=fq, fix_type_text=text,
             satellites=satellites, hdop=hdop,
             h_acc_m=h_acc, v_acc_m=v_acc,
             acc_source=acc_source,
+            gnss_utc_time=gnss_utc_time,
+            source_protocol="nmea",
         )
 
     # ── Emit helper ───────────────────────────────────────────────────────
@@ -582,12 +708,20 @@ class GpsService:
         """Push measurement to queue and update session diagnostics."""
         global _diag_valid_gga, _diag_max_gap_s, _diag_last_emit_t
         global _diag_rtk_fixed_count, _diag_rtk_float_count, _diag_other_fix_count
+        global _diag_dt_sum, _diag_dt_count, _diag_dt_min, _diag_dup_ts_count
 
         t = m.timestamp_monotonic
         if _diag_last_emit_t > 0.0:
-            gap = t - _diag_last_emit_t
-            if gap > _diag_max_gap_s:
-                _diag_max_gap_s = gap
+            dt = t - _diag_last_emit_t
+            if dt < 1e-6:
+                _diag_dup_ts_count += 1
+            else:
+                if dt > _diag_max_gap_s:
+                    _diag_max_gap_s = dt
+                _diag_dt_sum   += dt
+                _diag_dt_count += 1
+                if dt < _diag_dt_min:
+                    _diag_dt_min = dt
         _diag_last_emit_t = t
 
         _diag_valid_gga += 1
